@@ -2,12 +2,19 @@
 import mongoose from "mongoose";
 
 export const connectDB = async () => {
-  try {
-    // Change MONGO_URI to MONGODB_URI to match .env file
-    await mongoose.connect(process.env.MONGODB_URI as string);
-    console.log("MongoDB Connected ✅");
-  } catch (error) {
-    console.error("DB Error ❌", error);
-    process.exit(1);
-  }
+    try {
+        const mongoURI = process.env.MONGODB_URI || process.env.MONGO_URI;
+
+        if (!mongoURI) {
+            console.error("❌ Error: MONGODB_URI is not defined in the .env file.");
+            console.log("👉 Please add MONGODB_URI=your_mongodb_connection_string to wsd-server/.env");
+            process.exit(1);
+        }
+
+        await mongoose.connect(mongoURI);
+        console.log("MongoDB Connected ✅");
+    } catch (error) {
+        console.error("DB Connection Error ❌", error);
+        process.exit(1);
+    }
 };
