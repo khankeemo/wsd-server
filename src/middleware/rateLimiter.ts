@@ -1,0 +1,1 @@
+export const rateLimiter = (req:any,res:any,next:any)=>next();

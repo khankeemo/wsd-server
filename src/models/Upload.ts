@@ -1,0 +1,1 @@
+export interface Upload { id: string; file: string; }
