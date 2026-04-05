@@ -11,6 +11,13 @@ export interface IUser extends Document {
   company?: string;
   role: 'admin' | 'client' | 'developer';
   avatar?: string;
+  preferences: {
+    theme: "light" | "dark";
+    notifications: {
+      email: boolean;
+      push: boolean;
+    };
+  };
   provider?: string;
   providerId?: string;
   isOAuthUser: boolean;
@@ -55,6 +62,17 @@ const UserSchema = new Schema<IUser>(
     avatar: {
       type: String,
       default: '',
+    },
+    preferences: {
+      theme: {
+        type: String,
+        enum: ['light', 'dark'],
+        default: 'light',
+      },
+      notifications: {
+        email: { type: Boolean, default: true },
+        push: { type: Boolean, default: true },
+      },
     },
     provider: {
       type: String,
