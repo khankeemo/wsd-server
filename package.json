@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "ts-node server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "seed:users": "ts-node src/seeders/seedUsers.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

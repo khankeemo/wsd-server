@@ -14,7 +14,10 @@ const connectDB = async () => {
             console.log("👉 Please add MONGODB_URI=your_mongodb_connection_string to wsd-server/.env");
             process.exit(1);
         }
-        await mongoose_1.default.connect(mongoURI);
+        await mongoose_1.default.connect(mongoURI, {
+            dbName: "wsd",
+            authSource: "admin",
+        });
         console.log("MongoDB Connected ✅");
     }
     catch (error) {
