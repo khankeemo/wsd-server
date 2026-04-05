@@ -10,6 +10,17 @@ const getUserId = (req: Request): string | undefined => {
   return (req as any).userId || (req as any).user?.id;
 };
 
+const normalizeClientPayload = (body: Record<string, unknown>) => {
+  return {
+    name: String(body.name || "").trim(),
+    email: String(body.email || "").trim().toLowerCase(),
+    phone: String(body.phone || "").trim(),
+    company: String(body.company || "").trim(),
+    address: String(body.address || "").trim(),
+    status: (body.status === "inactive" ? "inactive" : "active") as "active" | "inactive",
+  };
+};
+
 // Get all clients for the authenticated user
 export const getClients = async (req: Request, res: Response) => {
   try {
@@ -55,15 +66,20 @@ export const getClientById = async (req: Request, res: Response) => {
 export const createClient = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
-    const { name, email, phone, company, address, status } = req.body;
+    const { name, email, phone, company, address, status } = normalizeClientPayload(req.body);
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    // Validate required fields
     if (!name || !email) {
       return res.status(400).json({ message: "Missing required fields: name, email" });
+    }
+
+    const existingClient = await Client.findOne({ userId, email });
+
+    if (existingClient) {
+      return res.status(409).json({ message: "A client with this email already exists" });
     }
 
     const client = await Client.create({
@@ -88,7 +104,7 @@ export const updateClient = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const { name, email, phone, company, address, status } = req.body;
+    const { name, email, phone, company, address, status } = normalizeClientPayload(req.body);
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
@@ -100,12 +116,26 @@ export const updateClient = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    if (name) client.name = name;
-    if (email) client.email = email;
-    if (phone !== undefined) client.phone = phone;
-    if (company !== undefined) client.company = company;
-    if (address !== undefined) client.address = address;
-    if (status) client.status = status;
+    if (!name || !email) {
+      return res.status(400).json({ message: "Missing required fields: name, email" });
+    }
+
+    const duplicateClient = await Client.findOne({
+      userId,
+      email,
+      _id: { $ne: id },
+    });
+
+    if (duplicateClient) {
+      return res.status(409).json({ message: "A client with this email already exists" });
+    }
+
+    client.name = name;
+    client.email = email;
+    client.phone = phone;
+    client.company = company;
+    client.address = address;
+    client.status = status;
 
     await client.save();
 
