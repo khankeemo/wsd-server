@@ -22,6 +22,12 @@ const parseBudget = (value: unknown) => {
 export const getServices = async (_req: Request, res: Response) => {
   try {
     const services = await getActiveServices();
+    res.set({
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+      "Surrogate-Control": "no-store",
+    });
     res.json({
       success: true,
       data: services.map((service) => ({

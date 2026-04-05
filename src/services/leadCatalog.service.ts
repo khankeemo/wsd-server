@@ -29,22 +29,13 @@ const defaultServices = [
 ];
 
 export const ensureDefaultServices = async () => {
-  await Promise.all(
-    defaultServices.map((service) =>
-      Service.findOneAndUpdate(
-        { name: service.name },
-        {
-          $set: {
-            name: service.name,
-            description: service.description,
-            price: service.price,
-            isActive: true,
-          },
-        },
-        { upsert: true, returnDocument: "after" }
-      )
-    )
-  );
+  const existingCount = await Service.countDocuments();
+
+  if (existingCount > 0) {
+    return;
+  }
+
+  await Service.insertMany(defaultServices.map((service) => ({ ...service, isActive: true })));
 };
 
 export const getActiveServices = async () => {
