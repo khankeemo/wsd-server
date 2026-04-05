@@ -4,6 +4,7 @@
 import { Router } from 'express';
 import userController from '../controllers/user.controller';
 import { authMiddleware } from '../middleware/auth.middleware';
+import { requireRoles } from '../middleware/role.middleware';
 
 const router = Router();
 
@@ -12,6 +13,8 @@ router.use(authMiddleware);
 
 // GET /api/users/me - Get current user profile
 router.get('/me', userController.getCurrentUser.bind(userController));
+
+router.get('/role/:role', requireRoles('admin'), userController.getUsersByRole.bind(userController));
 
 // PUT /api/users/update - Update user profile
 router.put('/update', userController.updateUserProfile.bind(userController));

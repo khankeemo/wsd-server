@@ -67,9 +67,18 @@ const activityLogSchema = new mongoose_1.Schema({
     user: { type: String, required: true },
     timestamp: { type: Date, default: Date.now }
 });
+const statusUpdateSchema = new mongoose_1.Schema({
+    status: { type: String, enum: ["pending", "in-progress", "completed", "on-hold"], required: true },
+    progress: { type: Number, min: 0, max: 100, default: 0 },
+    note: { type: String, default: "" },
+    updatedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", required: true },
+    createdAt: { type: Date, default: Date.now }
+});
 // Main Project Schema
 const projectSchema = new mongoose_1.Schema({
     userId: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", required: true },
+    clientId: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", default: null },
+    assignedDevId: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", default: null },
     name: { type: String, required: true },
     description: { type: String, required: true },
     client: { type: String, required: true },
@@ -105,6 +114,7 @@ const projectSchema = new mongoose_1.Schema({
     feedback: [feedbackSchema],
     customization: { type: customizationSchema, default: () => ({}) },
     activityLog: [activityLogSchema],
+    statusUpdates: [statusUpdateSchema],
 }, {
     timestamps: true,
     toJSON: { virtuals: true },

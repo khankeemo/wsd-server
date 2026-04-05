@@ -37,9 +37,19 @@ export interface IActivityLog {
   timestamp: Date;
 }
 
+export interface IStatusUpdate {
+  status: 'pending' | 'in-progress' | 'completed' | 'on-hold';
+  progress: number;
+  note: string;
+  updatedBy: mongoose.Types.ObjectId;
+  createdAt: Date;
+}
+
 // Main Project Interface with virtuals
 export interface IProject extends Document {
   userId: mongoose.Types.ObjectId;
+  clientId?: mongoose.Types.ObjectId | null;
+  assignedDevId?: mongoose.Types.ObjectId | null;
   name: string;
   description: string;
   client: string;
@@ -58,6 +68,7 @@ export interface IProject extends Document {
   feedback: IFeedback[];
   customization: ICustomization;
   activityLog: IActivityLog[];
+  statusUpdates: IStatusUpdate[];
   createdAt: Date;
   updatedAt: Date;
   // Virtuals
@@ -98,10 +109,20 @@ const activityLogSchema = new Schema<IActivityLog>({
   timestamp: { type: Date, default: Date.now }
 });
 
+const statusUpdateSchema = new Schema<IStatusUpdate>({
+  status: { type: String, enum: ["pending", "in-progress", "completed", "on-hold"], required: true },
+  progress: { type: Number, min: 0, max: 100, default: 0 },
+  note: { type: String, default: "" },
+  updatedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
 // Main Project Schema
 const projectSchema = new Schema<IProject>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    clientId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+    assignedDevId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     name: { type: String, required: true },
     description: { type: String, required: true },
     client: { type: String, required: true },
@@ -143,6 +164,7 @@ const projectSchema = new Schema<IProject>(
     feedback: [feedbackSchema],
     customization: { type: customizationSchema, default: () => ({}) },
     activityLog: [activityLogSchema],
+    statusUpdates: [statusUpdateSchema],
   },
   {
     timestamps: true,

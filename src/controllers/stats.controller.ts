@@ -5,31 +5,46 @@
 
 import { Request, Response } from "express";
 import { Project } from "../models/Project";
+import { Client } from "../models/Client";
+import { Task } from "../models/Task";
+import Payment from "../models/Payment";
+import Ticket from "../models/Ticket";
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
-    // Get user ID from auth middleware (attached as userId)
     const userId = (req as any).userId;
+    const user = (req as any).user;
 
-    if (!userId) {
+    if (!userId || !user) {
       return res.status(401).json({ 
         success: false, 
         message: "Unauthorized - No user ID found" 
       });
     }
 
-    // Get real counts from database
-    const totalProjects = await Project.countDocuments({ userId });
+    let totalProjects = 0;
+    let totalClients = 0;
+    let pendingTasks = 0;
+    let totalRevenue = 0;
 
-    // TODO: Add these when models are created:
-    // const totalClients = await Client.countDocuments({ userId });
-    // const pendingTasks = await Task.countDocuments({ userId, status: 'pending' });
-    // const totalRevenue = await Payment.aggregate([...]);
-
-    // Current placeholders (will show 0 until modules are built)
-    const totalClients = 0;
-    const pendingTasks = 0;
-    const totalRevenue = 0;
+    if (user.role === "admin") {
+      totalProjects = await Project.countDocuments({ userId });
+      totalClients = await UserlessClientCount(userId);
+      pendingTasks = await Task.countDocuments({ userId, status: "pending" });
+      const payments = await Payment.find({ userId, status: "completed" });
+      totalRevenue = payments.reduce((sum, payment) => sum + payment.amount, 0);
+    } else if (user.role === "client") {
+      totalProjects = await Project.countDocuments({ clientId: userId });
+      totalClients = 1;
+      pendingTasks = await Ticket.countDocuments({ clientId: userId, status: { $ne: "resolved" } });
+      const payments = await Payment.find({ clientId: userId, status: "completed" });
+      totalRevenue = payments.reduce((sum, payment) => sum + payment.amount, 0);
+    } else if (user.role === "developer") {
+      totalProjects = await Project.countDocuments({ assignedDevId: userId });
+      totalClients = await Project.distinct("clientId", { assignedDevId: userId }).then((ids) => ids.filter(Boolean).length);
+      pendingTasks = await Project.countDocuments({ assignedDevId: userId, status: { $in: ["pending", "in-progress"] } });
+      totalRevenue = 0;
+    }
 
     res.json({
       success: true,
@@ -47,5 +62,13 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       message: "Failed to fetch dashboard statistics",
       error: (error as Error).message 
     });
+  }
+};
+
+const UserlessClientCount = async (userId: string) => {
+  try {
+    return await Client.countDocuments({ userId });
+  } catch {
+    return 0;
   }
 };

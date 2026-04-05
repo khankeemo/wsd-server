@@ -12,7 +12,7 @@ const User_1 = __importDefault(require("../models/User")); // ✅ FIXED: default
 // REGISTER - Creates new user and returns token
 const register = async (req, res) => {
     try {
-        const { name, email, password } = req.body;
+        const { name, email, password, role } = req.body;
         // Check if user already exists
         const existing = await User_1.default.findOne({ email });
         if (existing) {
@@ -25,16 +25,18 @@ const register = async (req, res) => {
             name,
             email,
             password: hashed,
+            role: role || "client",
         });
         // Generate JWT token
-        const token = jsonwebtoken_1.default.sign({ id: user._id }, process.env.JWT_SECRET || "secret", { expiresIn: "1d" });
+        const token = jsonwebtoken_1.default.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET || "secret", { expiresIn: "1d" });
         // Return token and user data
         res.json({
             token,
             user: {
                 id: user._id,
                 name: user.name,
-                email: user.email
+                email: user.email,
+                role: user.role
             }
         });
     }
@@ -59,14 +61,15 @@ const login = async (req, res) => {
             return res.status(400).json({ message: "Invalid password" });
         }
         // Generate JWT token
-        const token = jsonwebtoken_1.default.sign({ id: user._id }, process.env.JWT_SECRET || "secret", { expiresIn: "1d" });
+        const token = jsonwebtoken_1.default.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET || "secret", { expiresIn: "1d" });
         // Return token and user data
         res.json({
             token,
             user: {
                 id: user._id,
                 name: user.name,
-                email: user.email
+                email: user.email,
+                role: user.role
             }
         });
     }

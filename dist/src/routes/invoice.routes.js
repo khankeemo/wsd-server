@@ -4,37 +4,24 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_middleware_1 = require("../middleware/auth.middleware");
+const invoice_controller_1 = require("../controllers/invoice.controller");
 const router = (0, express_1.Router)();
 // All routes require authentication
 router.use(auth_middleware_1.authMiddleware);
 // GET /api/invoices - Get all invoices
-router.get('/', (req, res) => {
-    res.status(200).json({ success: true, data: [] });
-});
+router.get('/', invoice_controller_1.getInvoices);
 // GET /api/invoices/stats - Get invoice statistics
-router.get('/stats', (req, res) => {
-    res.status(200).json({ success: true, data: { total: 0, paid: 0, pending: 0, overdue: 0, totalAmount: 0 } });
-});
+router.get('/stats', invoice_controller_1.getInvoiceStats);
 // GET /api/invoices/:id - Get single invoice
-router.get('/:id', (req, res) => {
-    res.status(200).json({ success: true, data: null });
-});
+router.get('/:id', invoice_controller_1.getInvoiceById);
 // POST /api/invoices - Create invoice
-router.post('/', (req, res) => {
-    res.status(201).json({ success: true, data: req.body });
-});
+router.post('/', invoice_controller_1.createInvoice);
 // PUT /api/invoices/:id - Update invoice
-router.put('/:id', (req, res) => {
-    res.status(200).json({ success: true, data: req.body });
-});
+router.put('/:id', invoice_controller_1.updateInvoice);
 // DELETE /api/invoices/:id - Delete invoice
-router.delete('/:id', (req, res) => {
-    res.status(200).json({ success: true, message: 'Invoice deleted' });
-});
+router.delete('/:id', invoice_controller_1.deleteInvoice);
 // PATCH /api/invoices/:id/paid - Mark invoice as paid
-router.patch('/:id/paid', (req, res) => {
-    res.status(200).json({ success: true, message: 'Invoice marked as paid' });
-});
+router.patch('/:id/paid', invoice_controller_1.markInvoicePaid);
 // GET /api/invoices/:id/download - Download invoice PDF
 router.get('/:id/download', (req, res) => {
     res.status(200).json({ success: true, message: 'Download endpoint' });

@@ -18,6 +18,8 @@ router.use(auth_middleware_1.authMiddleware);
 // ============================================================
 // GET /api/projects - Get all projects
 router.get("/", project_controller_1.getProjects);
+// GET /api/projects/status/all - Get all projects status summary
+router.get("/status/all", project_controller_1.getAllProjectsStatus);
 // GET /api/projects/:id - Get single project
 router.get("/:id", project_controller_1.getProjectById);
 // POST /api/projects - Create new project
@@ -33,8 +35,8 @@ router.delete("/:id", project_controller_1.deleteProject);
 router.put("/:id/progress", project_controller_1.updateProgress);
 // GET /api/projects/:id/status - Get complete status for 8 cards
 router.get("/:id/status", project_controller_1.getProjectStatus);
-// GET /api/projects/status/all - Get all projects status summary
-router.get("/status/all", project_controller_1.getAllProjectsStatus);
+// PUT /api/projects/:id/status - Update project status
+router.put("/:id/status", project_controller_1.updateProjectStatus);
 // ============================================================
 // MESSAGE ROUTES (Q&A - Card #5)
 // ============================================================

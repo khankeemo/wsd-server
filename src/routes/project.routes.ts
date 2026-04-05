@@ -12,6 +12,7 @@ import {
   updateProject,
   deleteProject,
   updateProgress,
+  updateProjectStatus,
   getProjectStatus,
   getAllProjectsStatus,
   addMessage,
@@ -32,6 +33,9 @@ router.use(authMiddleware);
 
 // GET /api/projects - Get all projects
 router.get("/", getProjects);
+
+// GET /api/projects/status/all - Get all projects status summary
+router.get("/status/all", getAllProjectsStatus);
 
 // GET /api/projects/:id - Get single project
 router.get("/:id", getProjectById);
@@ -55,8 +59,8 @@ router.put("/:id/progress", updateProgress);
 // GET /api/projects/:id/status - Get complete status for 8 cards
 router.get("/:id/status", getProjectStatus);
 
-// GET /api/projects/status/all - Get all projects status summary
-router.get("/status/all", getAllProjectsStatus);
+// PUT /api/projects/:id/status - Update project status
+router.put("/:id/status", updateProjectStatus);
 
 // ============================================================
 // MESSAGE ROUTES (Q&A - Card #5)

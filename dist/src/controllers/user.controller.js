@@ -43,7 +43,7 @@ class UserController {
                     email: user.email,
                     phone: user.phone || '',
                     company: user.company || '',
-                    role: user.role || 'user',
+                    role: user.role || 'client',
                     avatar: user.avatar || '',
                     createdAt: user.createdAt,
                 }
@@ -167,6 +167,29 @@ class UserController {
                 success: false,
                 message: 'Server error - Could not change password'
             });
+        }
+    }
+    async getUsersByRole(req, res) {
+        try {
+            const requester = req.user;
+            const { role } = req.params;
+            if (!requester) {
+                res.status(401).json({ success: false, message: 'Unauthorized' });
+                return;
+            }
+            if (requester.role !== 'admin') {
+                res.status(403).json({ success: false, message: 'Forbidden' });
+                return;
+            }
+            const users = await User_1.default.find({ role }).select('_id name email role company');
+            res.status(200).json({
+                success: true,
+                data: users,
+            });
+        }
+        catch (error) {
+            console.error('Get users by role error:', error);
+            res.status(500).json({ success: false, message: 'Failed to fetch users' });
         }
     }
 }

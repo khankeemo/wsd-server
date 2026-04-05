@@ -9,7 +9,7 @@ import User from "../models/User";  // ✅ FIXED: default import, not named impo
 // REGISTER - Creates new user and returns token
 export const register = async (req: Request, res: Response) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body;
 
     // Check if user already exists
     const existing = await User.findOne({ email });
@@ -25,11 +25,12 @@ export const register = async (req: Request, res: Response) => {
       name,
       email,
       password: hashed,
+      role: role || "client",
     });
 
     // Generate JWT token
     const token = jwt.sign(
-      { id: user._id },
+      { id: user._id, role: user.role },
       process.env.JWT_SECRET || "secret",
       { expiresIn: "1d" }
     );
@@ -40,7 +41,8 @@ export const register = async (req: Request, res: Response) => {
       user: { 
         id: user._id, 
         name: user.name, 
-        email: user.email 
+        email: user.email,
+        role: user.role 
       } 
     });
   } catch (err) {
@@ -68,7 +70,7 @@ export const login = async (req: Request, res: Response) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { id: user._id },
+      { id: user._id, role: user.role },
       process.env.JWT_SECRET || "secret",
       { expiresIn: "1d" }
     );
@@ -79,7 +81,8 @@ export const login = async (req: Request, res: Response) => {
       user: { 
         id: user._id, 
         name: user.name, 
-        email: user.email 
+        email: user.email,
+        role: user.role 
       } 
     });
   } catch (err) {

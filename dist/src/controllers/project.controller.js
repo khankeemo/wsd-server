@@ -4,12 +4,43 @@
 // Features: Create, Read, Update, Delete with user authentication
 // ADDED: Status dashboard methods (progress, messages, feedback, customization)
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAllProjectsStatus = exports.getProjectStatus = exports.updateCustomization = exports.getFeedback = exports.addFeedback = exports.getMessages = exports.addMessage = exports.updateProgress = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProjectById = exports.getProjects = void 0;
+exports.getAllProjectsStatus = exports.getProjectStatus = exports.updateCustomization = exports.updateProjectStatus = exports.getFeedback = exports.addFeedback = exports.getMessages = exports.addMessage = exports.updateProgress = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProjectById = exports.getProjects = void 0;
 const Project_1 = require("../models/Project");
 // Helper to get userId from request (set by auth middleware)
 const getUserId = (req) => {
     return req.userId || req.user?.id;
 };
+const getProjectScopeQuery = (req) => {
+    const userId = getUserId(req);
+    const role = req.user?.role;
+    if (!userId || !role) {
+        return null;
+    }
+    if (role === "admin") {
+        return { userId };
+    }
+    if (role === "client") {
+        return { clientId: userId };
+    }
+    if (role === "developer") {
+        return { assignedDevId: userId };
+    }
+    return null;
+};
+const findAccessibleProject = (req, id) => {
+    const scope = getProjectScopeQuery(req);
+    if (!scope) {
+        return null;
+    }
+    return Project_1.Project.findOne({ _id: id, ...scope });
+};
+const mapProjectResponse = (project) => ({
+    ...project.toObject(),
+    assignedDeveloperName: project.assignedDevId?.name || "",
+    assignedDeveloperEmail: project.assignedDevId?.email || "",
+    clientUserName: project.clientId?.name || project.client,
+    clientUserEmail: project.clientId?.email || project.clientEmail,
+});
 // ============================================================
 // BASIC CRUD FUNCTIONS
 // ============================================================
@@ -20,8 +51,15 @@ const getProjects = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const projects = await Project_1.Project.find({ userId }).sort({ createdAt: -1 });
-        res.json({ success: true, data: projects });
+        const scope = getProjectScopeQuery(req);
+        if (!scope) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const projects = await Project_1.Project.find(scope)
+            .populate("clientId", "name email")
+            .populate("assignedDevId", "name email")
+            .sort({ createdAt: -1 });
+        res.json({ success: true, data: projects.map(mapProjectResponse) });
     }
     catch (error) {
         console.error("Get projects error:", error);
@@ -37,11 +75,13 @@ const getProjectById = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const project = await Project_1.Project.findOne({ _id: id, userId });
+        const project = await findAccessibleProject(req, id);
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
-        res.json({ success: true, data: project });
+        await project.populate("clientId", "name email");
+        await project.populate("assignedDevId", "name email");
+        res.json({ success: true, data: mapProjectResponse(project) });
     }
     catch (error) {
         console.error("Get project error:", error);
@@ -53,9 +93,13 @@ exports.getProjectById = getProjectById;
 const createProject = async (req, res) => {
     try {
         const userId = getUserId(req);
-        const { name, description, client, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany } = req.body;
+        const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany } = req.body;
+        const role = req.user?.role;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
+        }
+        if (role !== "admin") {
+            return res.status(403).json({ message: "Only admins can create projects" });
         }
         // Validate required fields
         if (!name || !description || !client || !startDate) {
@@ -63,6 +107,8 @@ const createProject = async (req, res) => {
         }
         const project = await Project_1.Project.create({
             userId,
+            clientId: clientId || null,
+            assignedDevId: assignedDevId || null,
             name,
             description,
             client,
@@ -79,9 +125,18 @@ const createProject = async (req, res) => {
             messages: [],
             feedback: [],
             customization: { buttonColor: "#007AFF", theme: "light" },
-            activityLog: [{ action: "Project created", user: userId, timestamp: new Date() }]
+            activityLog: [{ action: "Project created", user: userId, timestamp: new Date() }],
+            statusUpdates: [{
+                    status: status || "pending",
+                    progress: 0,
+                    note: "Project created",
+                    updatedBy: userId,
+                    createdAt: new Date()
+                }]
         });
-        res.status(201).json({ success: true, data: project });
+        await project.populate("clientId", "name email");
+        await project.populate("assignedDevId", "name email");
+        res.status(201).json({ success: true, data: mapProjectResponse(project) });
     }
     catch (error) {
         console.error("Create project error:", error);
@@ -94,11 +149,15 @@ const updateProject = async (req, res) => {
     try {
         const userId = getUserId(req);
         const { id } = req.params;
-        const { name, description, client, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany } = req.body;
+        const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany } = req.body;
+        const role = req.user?.role;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const project = await Project_1.Project.findOne({ _id: id, userId });
+        if (role !== "admin") {
+            return res.status(403).json({ message: "Only admins can update project assignments" });
+        }
+        const project = await findAccessibleProject(req, id);
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
@@ -109,6 +168,10 @@ const updateProject = async (req, res) => {
             project.description = description;
         if (client)
             project.client = client;
+        if (clientId !== undefined)
+            project.clientId = clientId || null;
+        if (assignedDevId !== undefined)
+            project.assignedDevId = assignedDevId || null;
         if (clientEmail !== undefined)
             project.clientEmail = clientEmail;
         if (clientPhone !== undefined)
@@ -133,7 +196,9 @@ const updateProject = async (req, res) => {
             timestamp: new Date()
         });
         await project.save();
-        res.json({ success: true, data: project });
+        await project.populate("clientId", "name email");
+        await project.populate("assignedDevId", "name email");
+        res.json({ success: true, data: mapProjectResponse(project) });
     }
     catch (error) {
         console.error("Update project error:", error);
@@ -148,6 +213,10 @@ const deleteProject = async (req, res) => {
         const { id } = req.params;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
+        }
+        const role = req.user?.role;
+        if (role !== "admin") {
+            return res.status(403).json({ message: "Only admins can delete projects" });
         }
         const project = await Project_1.Project.findOneAndDelete({ _id: id, userId });
         if (!project) {
@@ -176,7 +245,7 @@ const updateProgress = async (req, res) => {
         if (progress === undefined || progress < 0 || progress > 100) {
             return res.status(400).json({ message: "Progress must be between 0 and 100" });
         }
-        const project = await Project_1.Project.findOne({ _id: id, userId });
+        const project = await findAccessibleProject(req, id);
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
@@ -193,8 +262,17 @@ const updateProgress = async (req, res) => {
             user: userId,
             timestamp: new Date()
         });
+        project.statusUpdates.push({
+            status: project.status,
+            progress,
+            note: "Progress updated",
+            updatedBy: userId,
+            createdAt: new Date()
+        });
         await project.save();
-        res.json({ success: true, data: project });
+        await project.populate("clientId", "name email");
+        await project.populate("assignedDevId", "name email");
+        res.json({ success: true, data: mapProjectResponse(project) });
     }
     catch (error) {
         console.error("Update progress error:", error);
@@ -214,7 +292,7 @@ const addMessage = async (req, res) => {
         if (!message || !sender) {
             return res.status(400).json({ message: "Message and sender are required" });
         }
-        const project = await Project_1.Project.findOne({ _id: id, userId });
+        const project = await findAccessibleProject(req, id);
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
@@ -242,7 +320,7 @@ const getMessages = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const project = await Project_1.Project.findOne({ _id: id, userId });
+        const project = await findAccessibleProject(req, id);
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
@@ -269,7 +347,7 @@ const addFeedback = async (req, res) => {
         if (!rating || rating < 1 || rating > 5) {
             return res.status(400).json({ message: "Rating must be between 1 and 5" });
         }
-        const project = await Project_1.Project.findOne({ _id: id, userId });
+        const project = await findAccessibleProject(req, id);
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
@@ -296,7 +374,7 @@ const getFeedback = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const project = await Project_1.Project.findOne({ _id: id, userId });
+        const project = await findAccessibleProject(req, id);
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
@@ -308,6 +386,57 @@ const getFeedback = async (req, res) => {
     }
 };
 exports.getFeedback = getFeedback;
+const updateProjectStatus = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        const role = req.user?.role;
+        const { id } = req.params;
+        const { status, note, progress } = req.body;
+        if (!userId) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        if (!["developer", "admin"].includes(role)) {
+            return res.status(403).json({ message: "Only admins and developers can update project status" });
+        }
+        const project = await findAccessibleProject(req, id);
+        if (!project) {
+            return res.status(404).json({ message: "Project not found" });
+        }
+        if (status) {
+            project.status = status;
+        }
+        if (typeof progress === "number") {
+            project.progress = progress;
+        }
+        else if (status === "completed") {
+            project.progress = 100;
+        }
+        else if (status === "in-progress" && project.progress === 0) {
+            project.progress = 25;
+        }
+        project.statusUpdates.push({
+            status: project.status,
+            progress: project.progress,
+            note: note || "Status updated",
+            updatedBy: userId,
+            createdAt: new Date()
+        });
+        project.activityLog.push({
+            action: `Status changed to ${project.status}`,
+            user: userId,
+            timestamp: new Date()
+        });
+        await project.save();
+        await project.populate("clientId", "name email");
+        await project.populate("assignedDevId", "name email");
+        res.json({ success: true, data: mapProjectResponse(project) });
+    }
+    catch (error) {
+        console.error("Update project status error:", error);
+        res.status(500).json({ message: "Failed to update project status" });
+    }
+};
+exports.updateProjectStatus = updateProjectStatus;
 // Update customization (card #7)
 const updateCustomization = async (req, res) => {
     try {
@@ -317,7 +446,7 @@ const updateCustomization = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const project = await Project_1.Project.findOne({ _id: id, userId });
+        const project = await findAccessibleProject(req, id);
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
@@ -346,7 +475,7 @@ const getProjectStatus = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const project = await Project_1.Project.findOne({ _id: id, userId });
+        const project = await findAccessibleProject(req, id);
         if (!project) {
             return res.status(404).json({ message: "Project not found" });
         }
@@ -377,6 +506,7 @@ const getProjectStatus = async (req, res) => {
             },
             messages: project.messages,
             feedback: project.feedback,
+            statusUpdates: project.statusUpdates,
             customization: project.customization,
             statusOverview: {
                 currentStatus: project.status,
@@ -400,7 +530,11 @@ const getAllProjectsStatus = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const projects = await Project_1.Project.find({ userId }).sort({ updatedAt: -1 });
+        const scope = getProjectScopeQuery(req);
+        if (!scope) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const projects = await Project_1.Project.find(scope).sort({ updatedAt: -1 });
         const statusSummaries = projects.map(project => ({
             _id: project._id,
             name: project.name,
