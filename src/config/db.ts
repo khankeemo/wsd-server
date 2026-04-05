@@ -11,7 +11,10 @@ export const connectDB = async () => {
             process.exit(1);
         }
 
-        await mongoose.connect(mongoURI);
+        await mongoose.connect(mongoURI, {
+            dbName: "wsd",
+            authSource: "admin",
+        });
         console.log("MongoDB Connected ✅");
     } catch (error) {
         console.error("DB Connection Error ❌", error);
