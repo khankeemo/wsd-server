@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "server.ts",
   "scripts": {
-    "dev": "ts-node server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only --ignore-watch node_modules server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "seed:users": "ts-node src/seeders/seedUsers.ts"
@@ -25,6 +25,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/mongoose": "^5.11.96",
     "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
     "typescript": "^5.0.0"
   }
 }

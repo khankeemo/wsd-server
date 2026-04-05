@@ -18,6 +18,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // API routes
+app.get("/", (req, res) => res.send("OK"));
 app.use("/api", routes);
 
 // Serve frontend build
