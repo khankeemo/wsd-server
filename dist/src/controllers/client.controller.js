@@ -19,6 +19,19 @@ const normalizeClientPayload = (body) => {
         status: (body.status === "inactive" ? "inactive" : "active"),
     };
 };
+const handleClientError = (res, error, fallbackMessage) => {
+    console.error(fallbackMessage, error);
+    if (error?.code === 11000) {
+        return res.status(409).json({ message: "A client with this email already exists" });
+    }
+    if (error?.name === "ValidationError") {
+        const validationMessage = Object.values(error.errors || {})
+            .map((issue) => issue.message)
+            .join(", ");
+        return res.status(400).json({ message: validationMessage || "Invalid client data" });
+    }
+    return res.status(500).json({ message: "Failed to process client request" });
+};
 // Get all clients for the authenticated user
 const getClients = async (req, res) => {
     try {
@@ -82,8 +95,7 @@ const createClient = async (req, res) => {
         res.status(201).json({ success: true, data: client });
     }
     catch (error) {
-        console.error("Create client error:", error);
-        res.status(500).json({ message: "Failed to create client" });
+        return handleClientError(res, error, "Create client error:");
     }
 };
 exports.createClient = createClient;
@@ -121,8 +133,7 @@ const updateClient = async (req, res) => {
         res.json({ success: true, data: client });
     }
     catch (error) {
-        console.error("Update client error:", error);
-        res.status(500).json({ message: "Failed to update client" });
+        return handleClientError(res, error, "Update client error:");
     }
 };
 exports.updateClient = updateClient;

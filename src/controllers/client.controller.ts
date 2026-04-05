@@ -21,6 +21,24 @@ const normalizeClientPayload = (body: Record<string, unknown>) => {
   };
 };
 
+const handleClientError = (res: Response, error: unknown, fallbackMessage: string) => {
+  console.error(fallbackMessage, error);
+
+  if ((error as any)?.code === 11000) {
+    return res.status(409).json({ message: "A client with this email already exists" });
+  }
+
+  if ((error as any)?.name === "ValidationError") {
+    const validationMessage = Object.values((error as any).errors || {})
+      .map((issue: any) => issue.message)
+      .join(", ");
+
+    return res.status(400).json({ message: validationMessage || "Invalid client data" });
+  }
+
+  return res.status(500).json({ message: "Failed to process client request" });
+};
+
 // Get all clients for the authenticated user
 export const getClients = async (req: Request, res: Response) => {
   try {
@@ -94,8 +112,7 @@ export const createClient = async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, data: client });
   } catch (error) {
-    console.error("Create client error:", error);
-    res.status(500).json({ message: "Failed to create client" });
+    return handleClientError(res, error, "Create client error:");
   }
 };
 
@@ -141,8 +158,7 @@ export const updateClient = async (req: Request, res: Response) => {
 
     res.json({ success: true, data: client });
   } catch (error) {
-    console.error("Update client error:", error);
-    res.status(500).json({ message: "Failed to update client" });
+    return handleClientError(res, error, "Update client error:");
   }
 };
 
