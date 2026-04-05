@@ -9,12 +9,14 @@
     "seed:users": "ts-node src/seeders/seedUsers.ts"
   },
   "dependencies": {
+    "@types/nodemailer": "^8.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^17.0.0",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.3.3"
+    "mongoose": "^9.3.3",
+    "nodemailer": "^8.0.4"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
