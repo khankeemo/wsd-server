@@ -43,30 +43,26 @@ const seed = async () => {
   try {
     await connectDB();
 
+    await User.deleteMany({});
+    console.log("Cleared all existing users.");
+
+    const usersToInsert = await Promise.all(
+      seedUsers.map(async (user) => ({
+        name: user.name,
+        email: user.email.toLowerCase(),
+        password: await bcrypt.hash(user.password, 10),
+        role: user.role,
+        phone: user.phone || "",
+        company: user.company || "",
+        isOAuthUser: false,
+        provider: null,
+        providerId: "",
+      }))
+    );
+
+    await User.insertMany(usersToInsert);
+
     for (const user of seedUsers) {
-      const hashedPassword = await bcrypt.hash(user.password, 10);
-
-      await User.findOneAndUpdate(
-        { email: user.email.toLowerCase() },
-        {
-          name: user.name,
-          email: user.email.toLowerCase(),
-          password: hashedPassword,
-          role: user.role,
-          phone: user.phone || "",
-          company: user.company || "",
-          isOAuthUser: false,
-          provider: null,
-          providerId: "",
-        },
-        {
-          upsert: true,
-          new: true,
-          runValidators: true,
-          setDefaultsOnInsert: true,
-        }
-      );
-
       console.log(`Seeded ${user.role}: ${user.email}`);
     }
 
