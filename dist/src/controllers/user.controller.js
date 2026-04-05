@@ -45,6 +45,7 @@ class UserController {
                     company: user.company || '',
                     role: user.role || 'client',
                     avatar: user.avatar || '',
+                    preferences: user.preferences || { theme: 'light', notifications: { email: true, push: true } },
                     createdAt: user.createdAt,
                 }
             });
@@ -61,12 +62,12 @@ class UserController {
      * Update user profile
      * PUT /api/users/profile
      * Requires: Authentication token
-     * Body: { name?, phone?, company? }
+     * Body: { name?, email?, phone?, company?, preferences? }
      */
     async updateUserProfile(req, res) {
         try {
             const userId = req.userId;
-            const { name, phone, company } = req.body;
+            const { name, email, phone, company, preferences } = req.body;
             if (!userId) {
                 res.status(401).json({
                     success: false,
@@ -77,10 +78,14 @@ class UserController {
             const updateData = {};
             if (name)
                 updateData.name = name;
+            if (email)
+                updateData.email = email;
             if (phone)
                 updateData.phone = phone;
             if (company)
                 updateData.company = company;
+            if (preferences)
+                updateData.preferences = preferences;
             const updatedUser = await User_1.default.findByIdAndUpdate(userId, { ...updateData, updatedAt: new Date() }, { new: true, runValidators: true }).select('-password');
             if (!updatedUser) {
                 res.status(404).json({

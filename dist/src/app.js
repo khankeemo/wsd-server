@@ -14,8 +14,25 @@ const app = (0, express_1.default)();
 (0, dbConnection_1.connectDB)().catch((error) => {
     console.error("Initial database connection failed", error);
 });
+const defaultAllowedOrigins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://websmith-z.vercel.app",
+    "https://websmith-khankeemos-projects.vercel.app",
+    "https://websmith-git-main-khankeemos-projects.vercel.app",
+];
+const configuredOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
+    : [];
+const allowedOrigins = Array.from(new Set([...defaultAllowedOrigins, ...configuredOrigins]));
 const corsOptions = {
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(",") : true,
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+        callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     credentials: true,
 };
 app.use((0, cors_1.default)(corsOptions));

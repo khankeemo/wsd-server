@@ -73,6 +73,17 @@ const UserSchema = new mongoose_1.Schema({
         type: String,
         default: '',
     },
+    preferences: {
+        theme: {
+            type: String,
+            enum: ['light', 'dark'],
+            default: 'light',
+        },
+        notifications: {
+            email: { type: Boolean, default: true },
+            push: { type: Boolean, default: true },
+        },
+    },
     provider: {
         type: String,
         enum: ['google', 'yahoo', null],
