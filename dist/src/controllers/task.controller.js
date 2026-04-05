@@ -2,12 +2,44 @@
 // C:\wsd-server\src\controllers\task.controller.ts
 // Task Controller - Full CRUD operations for tasks
 // Features: Create, Read, Update, Delete with user authentication
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteTask = exports.updateTask = exports.createTask = exports.getTaskById = exports.getTasks = void 0;
 const Task_1 = require("../models/Task");
+const mongoose_1 = __importDefault(require("mongoose"));
 // Helper to get userId from request
 const getUserId = (req) => {
     return req.userId || req.user?.id;
+};
+const normalizeNullableObjectId = (value) => {
+    if (value === undefined) {
+        return { hasValue: false, value: undefined };
+    }
+    if (value === null || value === "") {
+        return { hasValue: true, value: null };
+    }
+    if (!mongoose_1.default.Types.ObjectId.isValid(String(value))) {
+        return { hasValue: true, invalid: true };
+    }
+    return {
+        hasValue: true,
+        value: new mongoose_1.default.Types.ObjectId(String(value)),
+    };
+};
+const normalizeNullableDate = (value) => {
+    if (value === undefined) {
+        return { hasValue: false, value: undefined };
+    }
+    if (value === null || value === "") {
+        return { hasValue: true, value: null };
+    }
+    const parsedDate = new Date(String(value));
+    if (Number.isNaN(parsedDate.getTime())) {
+        return { hasValue: true, invalid: true };
+    }
+    return { hasValue: true, value: parsedDate };
 };
 // Get all tasks for the authenticated user
 const getTasks = async (req, res) => {
@@ -89,20 +121,32 @@ const updateTask = async (req, res) => {
         if (!task) {
             return res.status(404).json({ message: "Task not found" });
         }
+        const normalizedProjectId = normalizeNullableObjectId(projectId);
+        if ("invalid" in normalizedProjectId) {
+            return res.status(400).json({ message: "Invalid projectId" });
+        }
+        const normalizedClientId = normalizeNullableObjectId(clientId);
+        if ("invalid" in normalizedClientId) {
+            return res.status(400).json({ message: "Invalid clientId" });
+        }
+        const normalizedDueDate = normalizeNullableDate(dueDate);
+        if ("invalid" in normalizedDueDate) {
+            return res.status(400).json({ message: "Invalid dueDate" });
+        }
         if (title)
             task.title = title;
         if (description !== undefined)
             task.description = description;
-        if (projectId !== undefined)
-            task.projectId = projectId;
-        if (clientId !== undefined)
-            task.clientId = clientId;
+        if (normalizedProjectId.hasValue)
+            task.projectId = normalizedProjectId.value;
+        if (normalizedClientId.hasValue)
+            task.clientId = normalizedClientId.value;
         if (status)
             task.status = status;
         if (priority)
             task.priority = priority;
-        if (dueDate)
-            task.dueDate = new Date(dueDate);
+        if (normalizedDueDate.hasValue)
+            task.dueDate = normalizedDueDate.value;
         if (assignee !== undefined)
             task.assignee = assignee;
         await task.save();

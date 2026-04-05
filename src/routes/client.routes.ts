@@ -4,6 +4,7 @@
 
 import express from "express";
 import { authMiddleware } from "../middleware/auth.middleware";
+import { requireRoles } from "../middleware/role.middleware";
 import {
   getClients,
   getClientById,
@@ -16,6 +17,7 @@ const router = express.Router();
 
 // All client routes require authentication
 router.use(authMiddleware);
+router.use(requireRoles("admin"));
 
 // GET /api/clients - Get all clients
 router.get("/", getClients);

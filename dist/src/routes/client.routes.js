@@ -8,10 +8,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const auth_middleware_1 = require("../middleware/auth.middleware");
+const role_middleware_1 = require("../middleware/role.middleware");
 const client_controller_1 = require("../controllers/client.controller");
 const router = express_1.default.Router();
 // All client routes require authentication
 router.use(auth_middleware_1.authMiddleware);
+router.use((0, role_middleware_1.requireRoles)("admin"));
 // GET /api/clients - Get all clients
 router.get("/", client_controller_1.getClients);
 // GET /api/clients/:id - Get single client

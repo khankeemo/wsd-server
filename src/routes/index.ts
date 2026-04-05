@@ -13,6 +13,8 @@ import paymentRoutes from './payment.routes';
 import messageRoutes from './message.routes';
 import statsRoutes from './stats.routes';
 import ticketRoutes from './ticket.routes';
+import leadRoutes from './lead.routes';
+import serviceRoutes from './service.routes';
 
 const router = Router();
 
@@ -27,5 +29,7 @@ router.use('/payments', paymentRoutes);
 router.use('/messages', messageRoutes);
 router.use('/stats', statsRoutes);
 router.use('/tickets', ticketRoutes);
+router.use('/leads', leadRoutes);
+router.use('/services', serviceRoutes);
 
 export default router;

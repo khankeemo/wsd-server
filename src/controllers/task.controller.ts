@@ -4,10 +4,47 @@
 
 import { Request, Response } from "express";
 import { Task } from "../models/Task";
+import mongoose from "mongoose";
 
 // Helper to get userId from request
 const getUserId = (req: Request): string | undefined => {
   return (req as any).userId || (req as any).user?.id;
+};
+
+const normalizeNullableObjectId = (value: unknown) => {
+  if (value === undefined) {
+    return { hasValue: false as const, value: undefined };
+  }
+
+  if (value === null || value === "") {
+    return { hasValue: true as const, value: null };
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(String(value))) {
+    return { hasValue: true as const, invalid: true as const };
+  }
+
+  return {
+    hasValue: true as const,
+    value: new mongoose.Types.ObjectId(String(value)),
+  };
+};
+
+const normalizeNullableDate = (value: unknown) => {
+  if (value === undefined) {
+    return { hasValue: false as const, value: undefined };
+  }
+
+  if (value === null || value === "") {
+    return { hasValue: true as const, value: null };
+  }
+
+  const parsedDate = new Date(String(value));
+  if (Number.isNaN(parsedDate.getTime())) {
+    return { hasValue: true as const, invalid: true as const };
+  }
+
+  return { hasValue: true as const, value: parsedDate };
 };
 
 // Get all tasks for the authenticated user
@@ -102,13 +139,28 @@ export const updateTask = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Task not found" });
     }
 
+    const normalizedProjectId = normalizeNullableObjectId(projectId);
+    if ("invalid" in normalizedProjectId) {
+      return res.status(400).json({ message: "Invalid projectId" });
+    }
+
+    const normalizedClientId = normalizeNullableObjectId(clientId);
+    if ("invalid" in normalizedClientId) {
+      return res.status(400).json({ message: "Invalid clientId" });
+    }
+
+    const normalizedDueDate = normalizeNullableDate(dueDate);
+    if ("invalid" in normalizedDueDate) {
+      return res.status(400).json({ message: "Invalid dueDate" });
+    }
+
     if (title) task.title = title;
     if (description !== undefined) task.description = description;
-    if (projectId !== undefined) task.projectId = projectId;
-    if (clientId !== undefined) task.clientId = clientId;
+    if (normalizedProjectId.hasValue) task.projectId = normalizedProjectId.value;
+    if (normalizedClientId.hasValue) task.clientId = normalizedClientId.value;
     if (status) task.status = status;
     if (priority) task.priority = priority;
-    if (dueDate) task.dueDate = new Date(dueDate);
+    if (normalizedDueDate.hasValue) task.dueDate = normalizedDueDate.value;
     if (assignee !== undefined) task.assignee = assignee;
 
     await task.save();
