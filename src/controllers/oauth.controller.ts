@@ -1,7 +1,7 @@
 // C:\wsd-server\src\controllers\oauth.controller.ts
 import { Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import { User } from "../models/User";
+import User from "../models/User";
 
 // OAuth registration/login handler
 export const oauthRegister = async (req: Request, res: Response) => {
