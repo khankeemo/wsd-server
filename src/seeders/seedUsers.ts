@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
-import { connectDB } from "../config/db";
+import { connectDB } from "../config/dbConnection";
 import User from "../models/User";
 
 dotenv.config();
