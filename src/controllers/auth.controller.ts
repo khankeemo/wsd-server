@@ -4,7 +4,8 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import User from "../models/User";  // ✅ FIXED: default import, not named import
+import User from "../models/User";
+import Notification from "../models/Notification";
 
 // REGISTER - Creates new user and returns token
 export const register = async (req: Request, res: Response) => {
@@ -54,10 +55,21 @@ export const register = async (req: Request, res: Response) => {
 // LOGIN - Authenticates user and returns token
 export const login = async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const { email, identifier, password } = req.body;
+    const loginId = identifier || email;
 
-    // Find user by email
-    const user = await User.findOne({ email });
+    if (!loginId) {
+      return res.status(400).json({ message: "Email or Client ID is required" });
+    }
+
+    // Find user by email OR customId (Client ID)
+    const user = await User.findOne({
+      $or: [
+        { email: loginId.toLowerCase() },
+        { customId: loginId }
+      ]
+    });
+
     if (!user) {
       return res.status(400).json({ message: "User not found" });
     }
@@ -66,6 +78,13 @@ export const login = async (req: Request, res: Response) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Invalid password" });
+    }
+
+    // Check if client is approved
+    if (user.role === "client" && !user.isApproved && !user.isTemporaryPassword) {
+      return res.status(403).json({ 
+        message: "Your account is awaiting admin approval. Please check back later." 
+      });
     }
 
     // Generate JWT token
@@ -82,11 +101,62 @@ export const login = async (req: Request, res: Response) => {
         id: user._id, 
         name: user.name, 
         email: user.email,
-        role: user.role 
+        role: user.role,
+        isTemporaryPassword: user.isTemporaryPassword,
+        setupCompleted: user.setupCompleted,
+        isApproved: user.isApproved
       } 
     });
   } catch (err) {
     console.error("Login error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// CHANGE PASSWORD - For clients to update temporary password
+export const changePassword = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId || (req as any).user?.id;
+    const { newPassword } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    user.password = hashed;
+    user.isTemporaryPassword = false;
+    user.isApproved = true;         // Approve client upon first-login completion
+    user.setupCompleted = true;
+    await user.save();
+
+    // Create notification for admin
+    try {
+      const admin = await User.findOne({ role: "admin" });
+      if (admin) {
+        await Notification.create({
+          recipientId: admin._id,
+          senderId: user._id,
+          type: 'client_setup_complete',
+          message: `Client ${user.name} (${user.customId}) has successfully changed their password and completed the first-login setup.`,
+        });
+      }
+    } catch (notifyErr) {
+      console.error("Failed to create admin notification:", notifyErr);
+    }
+
+    res.json({ success: true, message: "Password updated successfully" });
+  } catch (err) {
+    console.error("Change password error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

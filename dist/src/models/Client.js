@@ -11,6 +11,7 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const clientSchema = new mongoose_1.default.Schema({
     userId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    adminId: { type: mongoose_1.default.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     name: {
         type: String,
         required: [true, "Client name is required"],
@@ -47,6 +48,12 @@ const clientSchema = new mongoose_1.default.Schema({
         type: String,
         enum: ["active", "inactive"],
         default: "active",
+    },
+    customId: {
+        type: String,
+        unique: true,
+        sparse: true,
+        trim: true,
     },
 }, {
     timestamps: true,

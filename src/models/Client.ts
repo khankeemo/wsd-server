@@ -9,6 +9,7 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const clientSchema = new mongoose.Schema(
   {
     userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    adminId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
     name: {
       type: String,
       required: [true, "Client name is required"],
@@ -45,6 +46,12 @@ const clientSchema = new mongoose.Schema(
       type: String,
       enum: ["active", "inactive"],
       default: "active",
+    },
+    customId: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
     },
   },
   {

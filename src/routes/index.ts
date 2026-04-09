@@ -15,6 +15,7 @@ import statsRoutes from './stats.routes';
 import ticketRoutes from './ticket.routes';
 import leadRoutes from './lead.routes';
 import serviceRoutes from './service.routes';
+import adminRoutes from './admin.routes';
 
 const router = Router();
 
@@ -31,5 +32,6 @@ router.use('/stats', statsRoutes);
 router.use('/tickets', ticketRoutes);
 router.use('/leads', leadRoutes);
 router.use('/services', serviceRoutes);
+router.use('/admin', adminRoutes);
 
 export default router;

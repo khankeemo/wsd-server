@@ -108,6 +108,8 @@ const projectSchema = new mongoose_1.Schema({
     },
     startDate: { type: Date, required: true },
     endDate: { type: Date, default: null },
+    expectedCompletionDate: { type: Date, default: null },
+    customClientId: { type: String, trim: true, default: "" },
     budget: { type: Number, default: 0 },
     budgetUsed: { type: Number, default: 0 },
     messages: [messageSchema],

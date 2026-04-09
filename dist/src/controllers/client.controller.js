@@ -2,9 +2,16 @@
 // C:\wsd-server\src\controllers\client.controller.ts
 // Client Controller - Full CRUD operations for clients
 // Features: Create, Read, Update, Delete with user authentication
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteClient = exports.updateClient = exports.createClient = exports.getClientById = exports.getClients = void 0;
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const crypto_1 = __importDefault(require("crypto"));
 const Client_1 = require("../models/Client");
+const User_1 = __importDefault(require("../models/User"));
+const email_service_1 = require("../services/email.service");
 // Helper to get userId from request
 const getUserId = (req) => {
     return req.userId || req.user?.id;
@@ -35,11 +42,11 @@ const handleClientError = (res, error, fallbackMessage) => {
 // Get all clients for the authenticated user
 const getClients = async (req, res) => {
     try {
-        const userId = getUserId(req);
-        if (!userId) {
+        const adminId = getUserId(req);
+        if (!adminId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const clients = await Client_1.Client.find({ userId }).sort({ createdAt: -1 });
+        const clients = await Client_1.Client.find({ adminId }).sort({ createdAt: -1 });
         res.json({ success: true, data: clients });
     }
     catch (error) {
@@ -51,12 +58,12 @@ exports.getClients = getClients;
 // Get single client by ID
 const getClientById = async (req, res) => {
     try {
-        const userId = getUserId(req);
+        const adminId = getUserId(req);
         const { id } = req.params;
-        if (!userId) {
+        if (!adminId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const client = await Client_1.Client.findOne({ _id: id, userId });
+        const client = await Client_1.Client.findOne({ _id: id, adminId });
         if (!client) {
             return res.status(404).json({ message: "Client not found" });
         }
@@ -68,30 +75,91 @@ const getClientById = async (req, res) => {
     }
 };
 exports.getClientById = getClientById;
-// Create new client
+// Create new client (Admin only)
 const createClient = async (req, res) => {
     try {
-        const userId = getUserId(req);
+        const adminId = getUserId(req);
         const { name, email, phone, company, address, status } = normalizeClientPayload(req.body);
-        if (!userId) {
+        if (!adminId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
         if (!name || !email) {
             return res.status(400).json({ message: "Missing required fields: name, email" });
         }
-        const existingClient = await Client_1.Client.findOne({ userId, email });
-        if (existingClient) {
-            return res.status(409).json({ message: "A client with this email already exists" });
+        // Check if user already exists
+        const existingUser = await User_1.default.findOne({ email });
+        if (existingUser) {
+            return res.status(409).json({ message: "A user with this email already exists" });
         }
+        // 1. Generate unique customId (CL-XXXX)
+        const count = await User_1.default.countDocuments({ role: "client" });
+        const customId = `CL-${(count + 1).toString().padStart(4, "0")}`;
+        // 2. Generate temporary password
+        const tempPassword = crypto_1.default.randomBytes(4).toString("hex"); // 8 chars
+        const hashedTempPassword = await bcryptjs_1.default.hash(tempPassword, 10);
+        // 3. Create User account
+        const newUser = await User_1.default.create({
+            name,
+            email,
+            password: hashedTempPassword,
+            role: "client",
+            customId,
+            isTemporaryPassword: true,
+            isApproved: true, // Admin creating the account = approval granted
+            setupCompleted: false,
+        });
+        // 4. Create Client profile
         const client = await Client_1.Client.create({
-            userId,
+            userId: newUser._id,
+            adminId,
             name,
             email,
             phone: phone || "",
             company: company || "",
             address: address || "",
             status: status || "active",
+            customId,
         });
+        // 5. Send Email with credentials
+        const emailSubject = "Your Websmith Client Account Credentials";
+        const emailText = `
+      Welcome to Websmith, ${name}!
+      
+      Your client account has been created. Please use the following credentials to log in:
+      
+      Client ID: ${customId}
+      Temporary Password: ${tempPassword}
+      
+      Log in here: ${process.env.FRONTEND_URL || "http://localhost:3000"}/login
+      
+      Note: You will be required to change your password upon your first login.
+    `;
+        const emailHtml = `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e5ea; border-radius: 12px;">
+        <h2 style="color: #007AFF;">Welcome to Websmith!</h2>
+        <p>Hello <strong>${(0, email_service_1.escapeHtml)(name)}</strong>,</p>
+        <p>Your client account has been successfully created. You can now access your dashboard using the credentials below:</p>
+        <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin: 20px 0;">
+          <p style="margin: 0; margin-bottom: 8px;"><strong>Client ID:</strong> ${customId}</p>
+          <p style="margin: 0;"><strong>Temporary Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 4px; border-radius: 4px;">${tempPassword}</code></p>
+        </div>
+        <p>Please log in through our portal:</p>
+        <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/login" style="display: inline-block; background-color: #007AFF; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Log In to Dashboard</a>
+        <p style="margin-top: 20px; font-size: 14px; color: #8E8E93;">Note: For security reasons, you will be required to change this temporary password upon your first login.</p>
+      </div>
+    `;
+        try {
+            await (0, email_service_1.sendEmail)(email, emailSubject, emailText, emailHtml);
+        }
+        catch (emailError) {
+            console.error("Cleanup: Email failed to send, deleting partially created records:", emailError.message);
+            // Cleanup: Delete the User and Client if email fails
+            if (client?._id)
+                await Client_1.Client.findByIdAndDelete(client._id);
+            if (newUser?._id)
+                await User_1.default.findByIdAndDelete(newUser._id);
+            throw new Error(`Client creation failed because the invitation email could not be sent. Error: ${emailError.message}`);
+        }
         res.status(201).json({ success: true, data: client });
     }
     catch (error) {
@@ -102,13 +170,13 @@ exports.createClient = createClient;
 // Update client
 const updateClient = async (req, res) => {
     try {
-        const userId = getUserId(req);
+        const adminId = getUserId(req);
         const { id } = req.params;
         const { name, email, phone, company, address, status } = normalizeClientPayload(req.body);
-        if (!userId) {
+        if (!adminId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const client = await Client_1.Client.findOne({ _id: id, userId });
+        const client = await Client_1.Client.findOne({ _id: id, adminId });
         if (!client) {
             return res.status(404).json({ message: "Client not found" });
         }
@@ -116,7 +184,7 @@ const updateClient = async (req, res) => {
             return res.status(400).json({ message: "Missing required fields: name, email" });
         }
         const duplicateClient = await Client_1.Client.findOne({
-            userId,
+            adminId,
             email,
             _id: { $ne: id },
         });
@@ -140,16 +208,23 @@ exports.updateClient = updateClient;
 // Delete client
 const deleteClient = async (req, res) => {
     try {
-        const userId = getUserId(req);
+        const adminId = getUserId(req);
         const { id } = req.params;
-        if (!userId) {
+        if (!adminId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const client = await Client_1.Client.findOneAndDelete({ _id: id, userId });
+        // 1. Find the client first to get the associated userId
+        const client = await Client_1.Client.findOne({ _id: id });
         if (!client) {
             return res.status(404).json({ message: "Client not found" });
         }
-        res.json({ success: true, message: "Client deleted successfully" });
+        // 2. Delete the associated User account
+        if (client.userId) {
+            await User_1.default.findByIdAndDelete(client.userId);
+        }
+        // 3. Delete the Client profile
+        await Client_1.Client.findByIdAndDelete(id);
+        res.json({ success: true, message: "Client and associated user account deleted successfully" });
     }
     catch (error) {
         console.error("Delete client error:", error);

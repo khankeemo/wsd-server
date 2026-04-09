@@ -3,7 +3,11 @@
 // Features: Create, Read, Update, Delete with user authentication
 
 import { Request, Response } from "express";
+import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { Client } from "../models/Client";
+import User from "../models/User";
+import { sendEmail, escapeHtml } from "../services/email.service";
 
 // Helper to get userId from request
 const getUserId = (req: Request): string | undefined => {
@@ -42,13 +46,13 @@ const handleClientError = (res: Response, error: unknown, fallbackMessage: strin
 // Get all clients for the authenticated user
 export const getClients = async (req: Request, res: Response) => {
   try {
-    const userId = getUserId(req);
+    const adminId = getUserId(req);
     
-    if (!userId) {
+    if (!adminId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const clients = await Client.find({ userId }).sort({ createdAt: -1 });
+    const clients = await Client.find({ adminId }).sort({ createdAt: -1 });
     
     res.json({ success: true, data: clients });
   } catch (error) {
@@ -60,14 +64,14 @@ export const getClients = async (req: Request, res: Response) => {
 // Get single client by ID
 export const getClientById = async (req: Request, res: Response) => {
   try {
-    const userId = getUserId(req);
+    const adminId = getUserId(req);
     const { id } = req.params;
 
-    if (!userId) {
+    if (!adminId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const client = await Client.findOne({ _id: id, userId });
+    const client = await Client.findOne({ _id: id, adminId });
     
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
@@ -80,13 +84,13 @@ export const getClientById = async (req: Request, res: Response) => {
   }
 };
 
-// Create new client
+// Create new client (Admin only)
 export const createClient = async (req: Request, res: Response) => {
   try {
-    const userId = getUserId(req);
+    const adminId = getUserId(req);
     const { name, email, phone, company, address, status } = normalizeClientPayload(req.body);
 
-    if (!userId) {
+    if (!adminId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
@@ -94,21 +98,85 @@ export const createClient = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Missing required fields: name, email" });
     }
 
-    const existingClient = await Client.findOne({ userId, email });
-
-    if (existingClient) {
-      return res.status(409).json({ message: "A client with this email already exists" });
+    // Check if user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({ message: "A user with this email already exists" });
     }
 
+    // 1. Generate unique customId (CL-XXXX)
+    const count = await User.countDocuments({ role: "client" });
+    const customId = `CL-${(count + 1).toString().padStart(4, "0")}`;
+
+    // 2. Generate temporary password
+    const tempPassword = crypto.randomBytes(4).toString("hex"); // 8 chars
+    const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
+
+    // 3. Create User account
+    const newUser = await User.create({
+      name,
+      email,
+      password: hashedTempPassword,
+      role: "client",
+      customId,
+      isTemporaryPassword: true,
+      isApproved: true,         // Admin creating the account = approval granted
+      setupCompleted: false,
+    });
+
+    // 4. Create Client profile
     const client = await Client.create({
-      userId,
+      userId: newUser._id,
+      adminId,
       name,
       email,
       phone: phone || "",
       company: company || "",
       address: address || "",
       status: status || "active",
+      customId,
     });
+
+    // 5. Send Email with credentials
+    const emailSubject = "Your Websmith Client Account Credentials";
+    const emailText = `
+      Welcome to Websmith, ${name}!
+      
+      Your client account has been created. Please use the following credentials to log in:
+      
+      Client ID: ${customId}
+      Temporary Password: ${tempPassword}
+      
+      Log in here: ${process.env.FRONTEND_URL || "http://localhost:3000"}/login
+      
+      Note: You will be required to change your password upon your first login.
+    `;
+    const emailHtml = `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e5ea; border-radius: 12px;">
+        <h2 style="color: #007AFF;">Welcome to Websmith!</h2>
+        <p>Hello <strong>${escapeHtml(name)}</strong>,</p>
+        <p>Your client account has been successfully created. You can now access your dashboard using the credentials below:</p>
+        <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin: 20px 0;">
+          <p style="margin: 0; margin-bottom: 8px;"><strong>Client ID:</strong> ${customId}</p>
+          <p style="margin: 0;"><strong>Temporary Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 4px; border-radius: 4px;">${tempPassword}</code></p>
+        </div>
+        <p>Please log in through our portal:</p>
+        <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/login" style="display: inline-block; background-color: #007AFF; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Log In to Dashboard</a>
+        <p style="margin-top: 20px; font-size: 14px; color: #8E8E93;">Note: For security reasons, you will be required to change this temporary password upon your first login.</p>
+      </div>
+    `;
+
+    try {
+      await sendEmail(email, emailSubject, emailText, emailHtml);
+    } catch (emailError: any) {
+      console.error("Cleanup: Email failed to send, deleting partially created records:", emailError.message);
+      
+      // Cleanup: Delete the User and Client if email fails
+      if (client?._id) await Client.findByIdAndDelete(client._id);
+      if (newUser?._id) await User.findByIdAndDelete(newUser._id);
+      
+      throw new Error(`Client creation failed because the invitation email could not be sent. Error: ${emailError.message}`);
+    }
 
     res.status(201).json({ success: true, data: client });
   } catch (error) {
@@ -119,15 +187,15 @@ export const createClient = async (req: Request, res: Response) => {
 // Update client
 export const updateClient = async (req: Request, res: Response) => {
   try {
-    const userId = getUserId(req);
+    const adminId = getUserId(req);
     const { id } = req.params;
     const { name, email, phone, company, address, status } = normalizeClientPayload(req.body);
 
-    if (!userId) {
+    if (!adminId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const client = await Client.findOne({ _id: id, userId });
+    const client = await Client.findOne({ _id: id, adminId });
     
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
@@ -138,7 +206,7 @@ export const updateClient = async (req: Request, res: Response) => {
     }
 
     const duplicateClient = await Client.findOne({
-      userId,
+      adminId,
       email,
       _id: { $ne: id },
     });
@@ -165,20 +233,29 @@ export const updateClient = async (req: Request, res: Response) => {
 // Delete client
 export const deleteClient = async (req: Request, res: Response) => {
   try {
-    const userId = getUserId(req);
+    const adminId = getUserId(req);
     const { id } = req.params;
 
-    if (!userId) {
+    if (!adminId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const client = await Client.findOneAndDelete({ _id: id, userId });
+    // 1. Find the client first to get the associated userId
+    const client = await Client.findOne({ _id: id });
     
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
     }
 
-    res.json({ success: true, message: "Client deleted successfully" });
+    // 2. Delete the associated User account
+    if (client.userId) {
+      await User.findByIdAndDelete(client.userId);
+    }
+
+    // 3. Delete the Client profile
+    await Client.findByIdAndDelete(id);
+
+    res.json({ success: true, message: "Client and associated user account deleted successfully" });
   } catch (error) {
     console.error("Delete client error:", error);
     res.status(500).json({ message: "Failed to delete client" });

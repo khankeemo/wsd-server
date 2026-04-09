@@ -5,6 +5,7 @@
 
 import { Request, Response } from "express";
 import { Project } from "../models/Project";
+import User from "../models/User";
 
 // Helper to get userId from request (set by auth middleware)
 const getUserId = (req: Request): string | undefined => {
@@ -113,7 +114,7 @@ export const getProjectById = async (req: Request, res: Response) => {
 export const createProject = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
-    const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany } = req.body;
+    const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId } = req.body;
     const role = (req as any).user?.role;
 
     if (!userId) {
@@ -125,25 +126,33 @@ export const createProject = async (req: Request, res: Response) => {
     }
 
     // Validate required fields
-    if (!name || !description || !client || !startDate) {
-      return res.status(400).json({ message: "Missing required fields: name, description, client, startDate" });
+    if (!name || !description || !client || !startDate || !customClientId) {
+      return res.status(400).json({ message: "Missing required fields: name, description, client, startDate, customClientId" });
+    }
+
+    // Lookup client by customClientId
+    const clientUser = await User.findOne({ customId: customClientId, role: 'client' });
+    if (!clientUser) {
+      return res.status(404).json({ message: `Client with ID "${customClientId}" not found. Project cannot be created.` });
     }
 
     const project = await Project.create({
       userId,
-      clientId: clientId || null,
+      clientId: clientUser._id,
+      customClientId,
       assignedDevId: assignedDevId || null,
       name,
       description,
       client,
-      clientEmail: clientEmail || "",
-      clientPhone: clientPhone || "",
-      clientCompany: clientCompany || "",
+      clientEmail: clientEmail || clientUser.email,
+      clientPhone: clientPhone || clientUser.phone || "",
+      clientCompany: clientCompany || clientUser.company || "",
       status: status || "pending",
       priority: priority || "medium",
       projectType: projectType || "other",
       startDate: new Date(startDate),
       endDate: endDate ? new Date(endDate) : null,
+      expectedCompletionDate: req.body.expectedCompletionDate ? new Date(req.body.expectedCompletionDate) : null,
       budget: budget || 0,
       progress: 0,
       messages: [],
@@ -154,7 +163,7 @@ export const createProject = async (req: Request, res: Response) => {
         status: status || "pending",
         progress: 0,
         note: "Project created",
-        updatedBy: userId,
+        updatedBy: userId as any,
         createdAt: new Date()
       }]
     });
@@ -174,7 +183,7 @@ export const updateProject = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany } = req.body;
+    const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId } = req.body;
     const role = (req as any).user?.role;
 
     if (!userId) {
@@ -195,7 +204,16 @@ export const updateProject = async (req: Request, res: Response) => {
     if (name) project.name = name;
     if (description) project.description = description;
     if (client) project.client = client;
-    if (clientId !== undefined) project.clientId = clientId || null;
+    
+    if (customClientId && customClientId !== project.customClientId) {
+      const clientUser = await User.findOne({ customId: customClientId, role: 'client' });
+      if (!clientUser) {
+        return res.status(404).json({ message: `Client with ID "${customClientId}" not found.` });
+      }
+      project.customClientId = customClientId;
+      project.clientId = clientUser._id;
+    }
+
     if (assignedDevId !== undefined) project.assignedDevId = assignedDevId || null;
     if (clientEmail !== undefined) project.clientEmail = clientEmail;
     if (clientPhone !== undefined) project.clientPhone = clientPhone;
@@ -205,6 +223,9 @@ export const updateProject = async (req: Request, res: Response) => {
     if (projectType) project.projectType = projectType;
     if (startDate) project.startDate = new Date(startDate);
     if (endDate) project.endDate = new Date(endDate);
+    if (req.body.expectedCompletionDate !== undefined) {
+      project.expectedCompletionDate = req.body.expectedCompletionDate ? new Date(req.body.expectedCompletionDate) : null;
+    }
     if (budget !== undefined) project.budget = budget;
 
     project.activityLog.push({

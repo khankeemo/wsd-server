@@ -21,6 +21,10 @@ export interface IUser extends Document {
   provider?: string;
   providerId?: string;
   isOAuthUser: boolean;
+  customId?: string;
+  isTemporaryPassword?: boolean;
+  isApproved?: boolean;
+  setupCompleted?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -86,6 +90,23 @@ const UserSchema = new Schema<IUser>(
     isOAuthUser: {
       type: Boolean,
       default: false,
+    },
+    customId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    isTemporaryPassword: {
+      type: Boolean,
+      default: false,
+    },
+    isApproved: {
+      type: Boolean,
+      default: true,
+    },
+    setupCompleted: {
+      type: Boolean,
+      default: true,
     },
   },
   {

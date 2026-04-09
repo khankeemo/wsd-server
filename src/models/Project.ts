@@ -62,6 +62,8 @@ export interface IProject extends Document {
   progress: number;
   startDate: Date;
   endDate: Date | null;
+  expectedCompletionDate: Date | null;
+  customClientId?: string;
   budget: number;
   budgetUsed: number;
   messages: IMessage[];
@@ -156,6 +158,9 @@ const projectSchema = new Schema<IProject>(
     
     startDate: { type: Date, required: true },
     endDate: { type: Date, default: null },
+    expectedCompletionDate: { type: Date, default: null },
+    
+    customClientId: { type: String, trim: true, default: "" },
     
     budget: { type: Number, default: 0 },
     budgetUsed: { type: Number, default: 0 },

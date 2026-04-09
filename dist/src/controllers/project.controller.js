@@ -3,9 +3,13 @@
 // Project Controller - Full CRUD operations for projects
 // Features: Create, Read, Update, Delete with user authentication
 // ADDED: Status dashboard methods (progress, messages, feedback, customization)
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAllProjectsStatus = exports.getProjectStatus = exports.updateCustomization = exports.updateProjectStatus = exports.getFeedback = exports.addFeedback = exports.getMessages = exports.addMessage = exports.updateProgress = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProjectById = exports.getProjects = void 0;
 const Project_1 = require("../models/Project");
+const User_1 = __importDefault(require("../models/User"));
 // Helper to get userId from request (set by auth middleware)
 const getUserId = (req) => {
     return req.userId || req.user?.id;
@@ -93,7 +97,7 @@ exports.getProjectById = getProjectById;
 const createProject = async (req, res) => {
     try {
         const userId = getUserId(req);
-        const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany } = req.body;
+        const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId } = req.body;
         const role = req.user?.role;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
@@ -102,24 +106,31 @@ const createProject = async (req, res) => {
             return res.status(403).json({ message: "Only admins can create projects" });
         }
         // Validate required fields
-        if (!name || !description || !client || !startDate) {
-            return res.status(400).json({ message: "Missing required fields: name, description, client, startDate" });
+        if (!name || !description || !client || !startDate || !customClientId) {
+            return res.status(400).json({ message: "Missing required fields: name, description, client, startDate, customClientId" });
+        }
+        // Lookup client by customClientId
+        const clientUser = await User_1.default.findOne({ customId: customClientId, role: 'client' });
+        if (!clientUser) {
+            return res.status(404).json({ message: `Client with ID "${customClientId}" not found. Project cannot be created.` });
         }
         const project = await Project_1.Project.create({
             userId,
-            clientId: clientId || null,
+            clientId: clientUser._id,
+            customClientId,
             assignedDevId: assignedDevId || null,
             name,
             description,
             client,
-            clientEmail: clientEmail || "",
-            clientPhone: clientPhone || "",
-            clientCompany: clientCompany || "",
+            clientEmail: clientEmail || clientUser.email,
+            clientPhone: clientPhone || clientUser.phone || "",
+            clientCompany: clientCompany || clientUser.company || "",
             status: status || "pending",
             priority: priority || "medium",
             projectType: projectType || "other",
             startDate: new Date(startDate),
             endDate: endDate ? new Date(endDate) : null,
+            expectedCompletionDate: req.body.expectedCompletionDate ? new Date(req.body.expectedCompletionDate) : null,
             budget: budget || 0,
             progress: 0,
             messages: [],
@@ -149,7 +160,7 @@ const updateProject = async (req, res) => {
     try {
         const userId = getUserId(req);
         const { id } = req.params;
-        const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany } = req.body;
+        const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId } = req.body;
         const role = req.user?.role;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
@@ -168,8 +179,14 @@ const updateProject = async (req, res) => {
             project.description = description;
         if (client)
             project.client = client;
-        if (clientId !== undefined)
-            project.clientId = clientId || null;
+        if (customClientId && customClientId !== project.customClientId) {
+            const clientUser = await User_1.default.findOne({ customId: customClientId, role: 'client' });
+            if (!clientUser) {
+                return res.status(404).json({ message: `Client with ID "${customClientId}" not found.` });
+            }
+            project.customClientId = customClientId;
+            project.clientId = clientUser._id;
+        }
         if (assignedDevId !== undefined)
             project.assignedDevId = assignedDevId || null;
         if (clientEmail !== undefined)
@@ -188,6 +205,9 @@ const updateProject = async (req, res) => {
             project.startDate = new Date(startDate);
         if (endDate)
             project.endDate = new Date(endDate);
+        if (req.body.expectedCompletionDate !== undefined) {
+            project.expectedCompletionDate = req.body.expectedCompletionDate ? new Date(req.body.expectedCompletionDate) : null;
+        }
         if (budget !== undefined)
             project.budget = budget;
         project.activityLog.push({
