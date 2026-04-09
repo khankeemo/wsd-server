@@ -7,7 +7,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { Client } from "../models/Client";
 import User from "../models/User";
-import { sendEmail, escapeHtml } from "../services/email.service";
+import { sendEmail, escapeHtml, isEmailConfigured } from "../services/email.service";
 
 // Helper to get userId from request
 const getUserId = (req: Request): string | undefined => {
@@ -23,6 +23,27 @@ const normalizeClientPayload = (body: Record<string, unknown>) => {
     address: String(body.address || "").trim(),
     status: (body.status === "inactive" ? "inactive" : "active") as "active" | "inactive",
   };
+};
+
+const buildAdminOwnershipQuery = (adminId: string) => ({
+  $or: [
+    { adminId },
+    { adminId: { $exists: false }, userId: adminId },
+  ],
+});
+
+const generateCustomClientId = async () => {
+  let nextNumber = await User.countDocuments({ role: "client" });
+
+  while (true) {
+    nextNumber += 1;
+    const customId = `CL-${nextNumber.toString().padStart(4, "0")}`;
+    const existing = await User.exists({ customId });
+
+    if (!existing) {
+      return customId;
+    }
+  }
 };
 
 const handleClientError = (res: Response, error: unknown, fallbackMessage: string) => {
@@ -52,7 +73,7 @@ export const getClients = async (req: Request, res: Response) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const clients = await Client.find({ adminId }).sort({ createdAt: -1 });
+    const clients = await Client.find(buildAdminOwnershipQuery(adminId)).sort({ createdAt: -1 });
     
     res.json({ success: true, data: clients });
   } catch (error) {
@@ -71,7 +92,7 @@ export const getClientById = async (req: Request, res: Response) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const client = await Client.findOne({ _id: id, adminId });
+    const client = await Client.findOne({ _id: id, ...buildAdminOwnershipQuery(adminId) });
     
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
@@ -98,33 +119,70 @@ export const createClient = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Missing required fields: name, email" });
     }
 
-    // Check if user already exists
+    if (!isEmailConfigured()) {
+      return res.status(500).json({
+        message:
+          "Client email is not configured on the server. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM in the backend deployment environment.",
+      });
+    }
+
+    const existingClient = await Client.findOne({
+      email,
+      ...buildAdminOwnershipQuery(adminId),
+    });
+
+    if (existingClient) {
+      return res.status(409).json({ message: "A client with this email already exists" });
+    }
+
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
+
+    if (existingUser && existingUser.role !== "client") {
       return res.status(409).json({ message: "A user with this email already exists" });
     }
 
-    // 1. Generate unique customId (CL-XXXX)
-    const count = await User.countDocuments({ role: "client" });
-    const customId = `CL-${(count + 1).toString().padStart(4, "0")}`;
+    let customId = existingUser?.customId;
+    if (!customId) {
+      customId = await generateCustomClientId();
+    }
 
-    // 2. Generate temporary password
     const tempPassword = crypto.randomBytes(4).toString("hex"); // 8 chars
     const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
 
-    // 3. Create User account
-    const newUser = await User.create({
-      name,
-      email,
-      password: hashedTempPassword,
-      role: "client",
-      customId,
-      isTemporaryPassword: true,
-      isApproved: true,         // Admin creating the account = approval granted
-      setupCompleted: false,
-    });
+    const newUser = existingUser
+      ? await User.findByIdAndUpdate(
+          existingUser._id,
+          {
+            name,
+            email,
+            password: hashedTempPassword,
+            phone: phone || existingUser.phone || "",
+            company: company || existingUser.company || "",
+            role: "client",
+            customId,
+            isTemporaryPassword: true,
+            isApproved: true,
+            setupCompleted: false,
+          },
+          { new: true, runValidators: true }
+        )
+      : await User.create({
+          name,
+          email,
+          password: hashedTempPassword,
+          phone: phone || "",
+          company: company || "",
+          role: "client",
+          customId,
+          isTemporaryPassword: true,
+          isApproved: true,
+          setupCompleted: false,
+        });
 
-    // 4. Create Client profile
+    if (!newUser) {
+      throw new Error("Failed to create or update client user");
+    }
+
     const client = await Client.create({
       userId: newUser._id,
       adminId,
@@ -137,7 +195,6 @@ export const createClient = async (req: Request, res: Response) => {
       customId,
     });
 
-    // 5. Send Email with credentials
     const emailSubject = "Your Websmith Client Account Credentials";
     const emailText = `
       Welcome to Websmith, ${name}!
@@ -195,7 +252,7 @@ export const updateClient = async (req: Request, res: Response) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const client = await Client.findOne({ _id: id, adminId });
+    const client = await Client.findOne({ _id: id, ...buildAdminOwnershipQuery(adminId) });
     
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
@@ -206,9 +263,9 @@ export const updateClient = async (req: Request, res: Response) => {
     }
 
     const duplicateClient = await Client.findOne({
-      adminId,
       email,
       _id: { $ne: id },
+      ...buildAdminOwnershipQuery(adminId),
     });
 
     if (duplicateClient) {
@@ -241,14 +298,14 @@ export const deleteClient = async (req: Request, res: Response) => {
     }
 
     // 1. Find the client first to get the associated userId
-    const client = await Client.findOne({ _id: id });
+    const client = await Client.findOne({ _id: id, ...buildAdminOwnershipQuery(adminId) });
     
     if (!client) {
       return res.status(404).json({ message: "Client not found" });
     }
 
     // 2. Delete the associated User account
-    if (client.userId) {
+    if (client.userId && String(client.userId) !== adminId) {
       await User.findByIdAndDelete(client.userId);
     }
 

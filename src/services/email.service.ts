@@ -2,6 +2,15 @@ import nodemailer from "nodemailer";
 
 let transporterPromise: Promise<nodemailer.Transporter | null> | null = null;
 
+export const isEmailConfigured = () => {
+  return Boolean(
+    process.env.SMTP_HOST &&
+    process.env.SMTP_USER &&
+    process.env.SMTP_PASS &&
+    (process.env.SMTP_FROM || process.env.SMTP_USER)
+  );
+};
+
 const getTransporter = async () => {
   if (transporterPromise) {
     return transporterPromise;
