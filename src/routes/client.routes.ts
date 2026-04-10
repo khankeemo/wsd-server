@@ -15,6 +15,8 @@ import {
 
 const router = express.Router();
 
+router.get("/public", getClients);
+
 // All client routes require authentication
 router.use(authMiddleware);
 router.use(requireRoles("admin"));

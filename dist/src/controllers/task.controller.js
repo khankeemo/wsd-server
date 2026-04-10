@@ -9,6 +9,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteTask = exports.updateTask = exports.createTask = exports.getTaskById = exports.getTasks = void 0;
 const Task_1 = require("../models/Task");
 const mongoose_1 = __importDefault(require("mongoose"));
+const Project_1 = require("../models/Project");
+const User_1 = __importDefault(require("../models/User"));
+const Notification_1 = __importDefault(require("../models/Notification"));
 // Helper to get userId from request
 const getUserId = (req) => {
     return req.userId || req.user?.id;
@@ -45,10 +48,20 @@ const normalizeNullableDate = (value) => {
 const getTasks = async (req, res) => {
     try {
         const userId = getUserId(req);
+        const role = req.user?.role;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const tasks = await Task_1.Task.find({ userId }).sort({ createdAt: -1 });
+        const scope = role === "admin"
+            ? { userId }
+            : role === "developer"
+                ? { developerId: userId }
+                : { clientId: userId };
+        const tasks = await Task_1.Task.find(scope)
+            .populate("projectId", "name status progress")
+            .populate("clientId", "name email")
+            .populate("developerId", "name email customId")
+            .sort({ createdAt: -1 });
         res.json({ success: true, data: tasks });
     }
     catch (error) {
@@ -61,11 +74,20 @@ exports.getTasks = getTasks;
 const getTaskById = async (req, res) => {
     try {
         const userId = getUserId(req);
+        const role = req.user?.role;
         const { id } = req.params;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const task = await Task_1.Task.findOne({ _id: id, userId });
+        const scope = role === "admin"
+            ? { _id: id, userId }
+            : role === "developer"
+                ? { _id: id, developerId: userId }
+                : { _id: id, clientId: userId };
+        const task = await Task_1.Task.findOne(scope)
+            .populate("projectId", "name status progress")
+            .populate("clientId", "name email")
+            .populate("developerId", "name email customId");
         if (!task) {
             return res.status(404).json({ message: "Task not found" });
         }
@@ -81,25 +103,60 @@ exports.getTaskById = getTaskById;
 const createTask = async (req, res) => {
     try {
         const userId = getUserId(req);
-        const { title, description, projectId, clientId, status, priority, dueDate, assignee } = req.body;
+        const role = req.user?.role;
+        const { title, description, projectId, clientId, developerId, status, priority, dueDate, assignee, subtasks = [] } = req.body;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
+        }
+        if (role !== "admin") {
+            return res.status(403).json({ message: "Only admins can create tasks" });
         }
         // Validate required fields
         if (!title) {
             return res.status(400).json({ message: "Missing required field: title" });
         }
+        let resolvedClientId = clientId || null;
+        let resolvedDeveloperId = developerId || null;
+        let resolvedAssignee = assignee || "";
+        let resolvedProjectId = projectId || null;
+        if (projectId) {
+            const project = await Project_1.Project.findOne({ _id: projectId, userId });
+            if (!project) {
+                return res.status(404).json({ message: "Project not found" });
+            }
+            resolvedProjectId = String(project._id);
+            resolvedClientId = resolvedClientId || String(project.clientId || "");
+            resolvedDeveloperId = resolvedDeveloperId || String(project.assignedDevId || "");
+        }
+        if (resolvedDeveloperId) {
+            const developer = await User_1.default.findOne({ _id: resolvedDeveloperId, role: "developer" });
+            if (!developer) {
+                return res.status(404).json({ message: "Assigned developer not found" });
+            }
+            resolvedAssignee = developer.name;
+        }
         const task = await Task_1.Task.create({
             userId,
             title,
             description: description || "",
-            projectId: projectId || null,
-            clientId: clientId || null,
+            projectId: resolvedProjectId || null,
+            clientId: resolvedClientId || null,
+            developerId: resolvedDeveloperId || null,
             status: status || "pending",
             priority: priority || "medium",
             dueDate: dueDate ? new Date(dueDate) : null,
-            assignee: assignee || "",
+            assignee: resolvedAssignee,
+            subtasks,
         });
+        if (resolvedDeveloperId) {
+            await Notification_1.default.create({
+                recipientId: resolvedDeveloperId,
+                senderId: userId,
+                type: "task_assigned",
+                message: `You have been assigned a new task: ${title}`,
+                metadata: { taskId: task._id, projectId: resolvedProjectId },
+            });
+        }
         res.status(201).json({ success: true, data: task });
     }
     catch (error) {
@@ -112,14 +169,23 @@ exports.createTask = createTask;
 const updateTask = async (req, res) => {
     try {
         const userId = getUserId(req);
+        const role = req.user?.role;
         const { id } = req.params;
-        const { title, description, projectId, clientId, status, priority, dueDate, assignee } = req.body;
+        const { title, description, projectId, clientId, developerId, status, priority, dueDate, assignee, completionNote, subtasks, comments } = req.body;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const task = await Task_1.Task.findOne({ _id: id, userId });
+        const scope = role === "admin"
+            ? { _id: id, userId }
+            : role === "developer"
+                ? { _id: id, developerId: userId }
+                : { _id: id, clientId: userId };
+        const task = await Task_1.Task.findOne(scope);
         if (!task) {
             return res.status(404).json({ message: "Task not found" });
+        }
+        if (role === "client") {
+            return res.status(403).json({ message: "Clients can only view tasks" });
         }
         const normalizedProjectId = normalizeNullableObjectId(projectId);
         if ("invalid" in normalizedProjectId) {
@@ -137,19 +203,46 @@ const updateTask = async (req, res) => {
             task.title = title;
         if (description !== undefined)
             task.description = description;
-        if (normalizedProjectId.hasValue)
+        if (role === "admin" && normalizedProjectId.hasValue)
             task.projectId = normalizedProjectId.value;
-        if (normalizedClientId.hasValue)
+        if (role === "admin" && normalizedClientId.hasValue)
             task.clientId = normalizedClientId.value;
+        if (role === "admin" && developerId !== undefined) {
+            task.developerId = developerId ? new mongoose_1.default.Types.ObjectId(String(developerId)) : null;
+        }
         if (status)
             task.status = status;
-        if (priority)
+        if (role === "admin" && priority)
             task.priority = priority;
         if (normalizedDueDate.hasValue)
             task.dueDate = normalizedDueDate.value;
-        if (assignee !== undefined)
+        if (role === "admin" && assignee !== undefined)
             task.assignee = assignee;
+        if (completionNote !== undefined)
+            task.completionNote = completionNote;
+        if (subtasks !== undefined && role === "admin")
+            task.subtasks = subtasks;
+        if (comments !== undefined && Array.isArray(comments))
+            task.set("comments", comments);
+        if (task.status === "completed" && !task.completedAt) {
+            task.completedAt = new Date();
+        }
+        if (role === "developer" && status && !["pending", "in-progress", "completed"].includes(status)) {
+            return res.status(400).json({ message: "Developers can only move tasks through the delivery workflow" });
+        }
         await task.save();
+        if (task.status === "completed") {
+            const recipients = [task.userId, task.clientId].filter(Boolean);
+            if (recipients.length > 0) {
+                await Notification_1.default.insertMany(recipients.map((recipientId) => ({
+                    recipientId,
+                    senderId: userId,
+                    type: "task_completed",
+                    message: `${task.title} has been marked as completed`,
+                    metadata: { taskId: task._id, projectId: task.projectId },
+                })));
+            }
+        }
         res.json({ success: true, data: task });
     }
     catch (error) {
@@ -162,9 +255,13 @@ exports.updateTask = updateTask;
 const deleteTask = async (req, res) => {
     try {
         const userId = getUserId(req);
+        const role = req.user?.role;
         const { id } = req.params;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
+        }
+        if (role !== "admin") {
+            return res.status(403).json({ message: "Only admins can delete tasks" });
         }
         const task = await Task_1.Task.findOneAndDelete({ _id: id, userId });
         if (!task) {

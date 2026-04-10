@@ -6,6 +6,7 @@
 import { Request, Response } from "express";
 import { Project } from "../models/Project";
 import User from "../models/User";
+import Notification from "../models/Notification";
 
 // Helper to get userId from request (set by auth middleware)
 const getUserId = (req: Request): string | undefined => {
@@ -51,6 +52,7 @@ const mapProjectResponse = (project: any) => ({
   assignedDeveloperEmail: project.assignedDevId?.email || "",
   clientUserName: project.clientId?.name || project.client,
   clientUserEmail: project.clientId?.email || project.clientEmail,
+  published: Boolean(project.published),
 });
 
 // ============================================================
@@ -114,7 +116,7 @@ export const getProjectById = async (req: Request, res: Response) => {
 export const createProject = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
-    const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId } = req.body;
+    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, published } = req.body;
     const role = (req as any).user?.role;
 
     if (!userId) {
@@ -159,6 +161,7 @@ export const createProject = async (req: Request, res: Response) => {
       feedback: [],
       customization: { buttonColor: "#007AFF", theme: "light" },
       activityLog: [{ action: "Project created", user: userId, timestamp: new Date() }],
+      published: Boolean(published),
       statusUpdates: [{
         status: status || "pending",
         progress: 0,
@@ -183,7 +186,7 @@ export const updateProject = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId } = req.body;
+    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, published } = req.body;
     const role = (req as any).user?.role;
 
     if (!userId) {
@@ -227,6 +230,7 @@ export const updateProject = async (req: Request, res: Response) => {
       project.expectedCompletionDate = req.body.expectedCompletionDate ? new Date(req.body.expectedCompletionDate) : null;
     }
     if (budget !== undefined) project.budget = budget;
+    if (published !== undefined) project.published = Boolean(published);
 
     project.activityLog.push({
       action: "Project updated",
@@ -504,6 +508,19 @@ export const updateProjectStatus = async (req: Request, res: Response) => {
 
     await project.save();
 
+    const recipients = [project.clientId, project.assignedDevId].filter(Boolean);
+    if (recipients.length > 0) {
+      await Notification.insertMany(
+        recipients.map((recipientId) => ({
+          recipientId,
+          senderId: userId,
+          type: "project_status_changed",
+          message: `${project.name} is now ${project.status.replace("-", " ")}`,
+          metadata: { projectId: project._id, status: project.status, progress: project.progress },
+        }))
+      );
+    }
+
     await project.populate("clientId", "name email");
     await project.populate("assignedDevId", "name email");
 
@@ -638,5 +655,69 @@ export const getAllProjectsStatus = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Get all projects status error:", error);
     res.status(500).json({ message: "Failed to get projects status" });
+  }
+};
+
+export const getPublishedProjects = async (_req: Request, res: Response) => {
+  try {
+    const projects = await Project.find({ published: true, status: { $ne: "on-hold" } })
+      .select("name description client progress status projectType expectedCompletionDate published")
+      .sort({ updatedAt: -1 })
+      .limit(12);
+
+    res.json({ success: true, data: projects });
+  } catch (error) {
+    console.error("Get published projects error:", error);
+    res.status(500).json({ message: "Failed to fetch public projects" });
+  }
+};
+
+// Bulk update project statuses (for Kanban drag-and-drop)
+export const bulkUpdateProjectStatus = async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const role = (req as any).user?.role;
+    const { updates } = req.body; // [{ id, status, progress }]
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!role || !["admin", "developer"].includes(role)) {
+      return res.status(403).json({ message: "Only admins and developers can bulk update projects" });
+    }
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ message: "Updates array is required" });
+    }
+
+    const results = [];
+    for (const update of updates) {
+      const project = await findAccessibleProject(req, update.id);
+      if (!project) continue;
+
+      if (update.status) {
+        project.status = update.status;
+      }
+      if (typeof update.progress === "number") {
+        project.progress = update.progress;
+      }
+
+      project.statusUpdates.push({
+        status: project.status,
+        progress: project.progress,
+        note: "Status updated via Kanban",
+        updatedBy: userId as any,
+        createdAt: new Date()
+      });
+
+      await project.save();
+      results.push({ id: update.id, success: true });
+    }
+
+    res.json({ success: true, data: results });
+  } catch (error) {
+    console.error("Bulk update projects error:", error);
+    res.status(500).json({ message: "Failed to bulk update projects" });
   }
 };

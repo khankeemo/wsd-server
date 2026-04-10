@@ -39,45 +39,45 @@ const mongoose_1 = __importStar(require("mongoose"));
 const UserSchema = new mongoose_1.Schema({
     name: {
         type: String,
-        required: [true, 'Name is required'],
+        required: [true, "Name is required"],
         trim: true,
     },
     email: {
         type: String,
-        required: [true, 'Email is required'],
+        required: [true, "Email is required"],
         unique: true,
         lowercase: true,
         trim: true,
     },
     password: {
         type: String,
-        required: [true, 'Password is required'],
+        required: [true, "Password is required"],
         minlength: 6,
     },
     phone: {
         type: String,
         trim: true,
-        default: '',
+        default: "",
     },
     company: {
         type: String,
         trim: true,
-        default: '',
+        default: "",
     },
     role: {
         type: String,
-        enum: ['admin', 'client', 'developer'],
-        default: 'client',
+        enum: ["admin", "client", "developer"],
+        default: "client",
     },
     avatar: {
         type: String,
-        default: '',
+        default: "",
     },
     preferences: {
         theme: {
             type: String,
-            enum: ['light', 'dark'],
-            default: 'light',
+            enum: ["light", "dark"],
+            default: "light",
         },
         notifications: {
             email: { type: Boolean, default: true },
@@ -86,12 +86,12 @@ const UserSchema = new mongoose_1.Schema({
     },
     provider: {
         type: String,
-        enum: ['google', 'yahoo', null],
+        enum: ["google", "yahoo", null],
         default: null,
     },
     providerId: {
         type: String,
-        default: '',
+        default: "",
     },
     isOAuthUser: {
         type: Boolean,
@@ -101,6 +101,7 @@ const UserSchema = new mongoose_1.Schema({
         type: String,
         unique: true,
         sparse: true,
+        trim: true,
     },
     isTemporaryPassword: {
         type: Boolean,
@@ -114,7 +115,40 @@ const UserSchema = new mongoose_1.Schema({
         type: Boolean,
         default: true,
     },
+    published: {
+        type: Boolean,
+        default: false,
+    },
+    headline: {
+        type: String,
+        trim: true,
+        default: "",
+    },
+    bio: {
+        type: String,
+        trim: true,
+        default: "",
+        maxlength: 500,
+    },
+    skills: {
+        type: [String],
+        default: [],
+    },
+    status: {
+        type: String,
+        enum: ["active", "inactive", "on-leave"],
+        default: "active",
+    },
+    experienceYears: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+    joinedAt: {
+        type: Date,
+        default: null,
+    },
 }, {
     timestamps: true,
 });
-exports.default = mongoose_1.default.model('User', UserSchema);
+exports.default = mongoose_1.default.model("User", UserSchema);

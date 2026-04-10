@@ -5,45 +5,107 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TeamService = void 0;
 // PATH: C:\wsd-server\src\services\team.service.ts
-const Team_1 = __importDefault(require("../models/Team"));
-const mongoose_1 = __importDefault(require("mongoose"));
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const crypto_1 = __importDefault(require("crypto"));
+const User_1 = __importDefault(require("../models/User"));
 class TeamService {
+    mapDeveloper(user) {
+        return {
+            _id: String(user._id),
+            name: user.name,
+            email: user.email,
+            phone: user.phone || "",
+            role: "developer",
+            department: "development",
+            skills: user.skills || [],
+            experience: user.experienceYears || 0,
+            joinDate: user.joinedAt || user.createdAt,
+            status: user.status || "active",
+            avatar: user.avatar || "",
+            bio: user.bio || "",
+            published: Boolean(user.published),
+            customId: user.customId || "",
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt,
+        };
+    }
+    async generateCustomId() {
+        let next = await User_1.default.countDocuments({ role: "developer" });
+        while (true) {
+            next += 1;
+            const customId = `DEV-${next.toString().padStart(4, "0")}`;
+            const existing = await User_1.default.exists({ customId });
+            if (!existing)
+                return customId;
+        }
+    }
     // Get all team members for a user
-    async getAllTeamMembers(userId) {
-        return await Team_1.default.find({ userId: new mongoose_1.default.Types.ObjectId(userId) }).sort({ createdAt: -1 });
+    async getAllTeamMembers(_userId) {
+        const developers = await User_1.default.find({ role: "developer" }).sort({ createdAt: -1 });
+        return developers.map((developer) => this.mapDeveloper(developer));
     }
     // Get single team member by ID
-    async getTeamMemberById(id, userId) {
-        return await Team_1.default.findOne({ _id: id, userId: new mongoose_1.default.Types.ObjectId(userId) });
+    async getTeamMemberById(id, _userId) {
+        const developer = await User_1.default.findOne({ _id: id, role: "developer" });
+        return developer ? this.mapDeveloper(developer) : null;
     }
     // Create new team member
-    async createTeamMember(data, userId) {
-        const teamMember = new Team_1.default({
-            ...data,
-            userId: new mongoose_1.default.Types.ObjectId(userId),
+    async createTeamMember(data, _userId) {
+        const developer = await User_1.default.create({
+            name: data.name,
+            email: String(data.email).toLowerCase(),
+            password: await bcryptjs_1.default.hash(crypto_1.default.randomBytes(4).toString("hex"), 10),
+            phone: data.phone || "",
+            role: "developer",
+            skills: data.skills || [],
+            experienceYears: Number(data.experience) || 0,
+            joinedAt: data.joinDate ? new Date(data.joinDate) : null,
+            status: data.status || "active",
+            bio: data.bio || "",
+            published: Boolean(data.published),
+            customId: await this.generateCustomId(),
+            isTemporaryPassword: true,
+            setupCompleted: false,
         });
-        return await teamMember.save();
+        return this.mapDeveloper(developer);
     }
     // Update team member
-    async updateTeamMember(id, userId, data) {
-        return await Team_1.default.findOneAndUpdate({ _id: id, userId: new mongoose_1.default.Types.ObjectId(userId) }, { ...data, updatedAt: new Date() }, { new: true, runValidators: true });
+    async updateTeamMember(id, _userId, data) {
+        const developer = await User_1.default.findOneAndUpdate({ _id: id, role: "developer" }, {
+            ...(data.name !== undefined ? { name: data.name } : {}),
+            ...(data.email !== undefined ? { email: String(data.email).toLowerCase() } : {}),
+            ...(data.phone !== undefined ? { phone: data.phone } : {}),
+            ...(data.skills !== undefined ? { skills: data.skills } : {}),
+            ...(data.experience !== undefined ? { experienceYears: Number(data.experience) || 0 } : {}),
+            ...(data.joinDate !== undefined ? { joinedAt: data.joinDate ? new Date(data.joinDate) : null } : {}),
+            ...(data.status !== undefined ? { status: data.status } : {}),
+            ...(data.bio !== undefined ? { bio: data.bio } : {}),
+            ...(data.published !== undefined ? { published: Boolean(data.published) } : {}),
+        }, { new: true, runValidators: true });
+        return developer ? this.mapDeveloper(developer) : null;
     }
     // Delete team member
-    async deleteTeamMember(id, userId) {
-        const result = await Team_1.default.findOneAndDelete({ _id: id, userId: new mongoose_1.default.Types.ObjectId(userId) });
+    async deleteTeamMember(id, _userId) {
+        const result = await User_1.default.findOneAndDelete({ _id: id, role: "developer" });
         return result !== null;
     }
     // Get team members by role
-    async getTeamByRole(userId, role) {
-        return await Team_1.default.find({ userId: new mongoose_1.default.Types.ObjectId(userId), role });
+    async getTeamByRole(_userId, role) {
+        if (role !== "developer") {
+            return [];
+        }
+        return this.getAllTeamMembers("");
     }
     // Get team members by department
-    async getTeamByDepartment(userId, department) {
-        return await Team_1.default.find({ userId: new mongoose_1.default.Types.ObjectId(userId), department });
+    async getTeamByDepartment(_userId, department) {
+        if (department !== "development") {
+            return [];
+        }
+        return this.getAllTeamMembers("");
     }
     // Get active team members count
     async getActiveTeamCount(userId) {
-        return await Team_1.default.countDocuments({ userId: new mongoose_1.default.Types.ObjectId(userId), status: 'active' });
+        return await User_1.default.countDocuments({ role: "developer", status: "active" });
     }
 }
 exports.TeamService = TeamService;

@@ -11,6 +11,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const role_middleware_1 = require("../middleware/role.middleware");
 const client_controller_1 = require("../controllers/client.controller");
 const router = express_1.default.Router();
+router.get("/public", client_controller_1.getClients);
 // All client routes require authentication
 router.use(auth_middleware_1.authMiddleware);
 router.use((0, role_middleware_1.requireRoles)("admin"));

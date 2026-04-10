@@ -55,6 +55,10 @@ const clientSchema = new mongoose_1.default.Schema({
         sparse: true,
         trim: true,
     },
+    published: {
+        type: Boolean,
+        default: false,
+    },
 }, {
     timestamps: true,
 });

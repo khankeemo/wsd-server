@@ -5,6 +5,9 @@
 import { Request, Response } from "express";
 import { Task } from "../models/Task";
 import mongoose from "mongoose";
+import { Project } from "../models/Project";
+import User from "../models/User";
+import Notification from "../models/Notification";
 
 // Helper to get userId from request
 const getUserId = (req: Request): string | undefined => {
@@ -51,12 +54,24 @@ const normalizeNullableDate = (value: unknown) => {
 export const getTasks = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
+    const role = (req as any).user?.role;
     
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const tasks = await Task.find({ userId }).sort({ createdAt: -1 });
+    const scope =
+      role === "admin"
+        ? { userId }
+        : role === "developer"
+          ? { developerId: userId }
+          : { clientId: userId };
+
+    const tasks = await Task.find(scope)
+      .populate("projectId", "name status progress")
+      .populate("clientId", "name email")
+      .populate("developerId", "name email customId")
+      .sort({ createdAt: -1 });
     
     res.json({ success: true, data: tasks });
   } catch (error) {
@@ -69,13 +84,24 @@ export const getTasks = async (req: Request, res: Response) => {
 export const getTaskById = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
+    const role = (req as any).user?.role;
     const { id } = req.params;
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const task = await Task.findOne({ _id: id, userId });
+    const scope =
+      role === "admin"
+        ? { _id: id, userId }
+        : role === "developer"
+          ? { _id: id, developerId: userId }
+          : { _id: id, clientId: userId };
+
+    const task = await Task.findOne(scope)
+      .populate("projectId", "name status progress")
+      .populate("clientId", "name email")
+      .populate("developerId", "name email customId");
     
     if (!task) {
       return res.status(404).json({ message: "Task not found" });
@@ -92,10 +118,15 @@ export const getTaskById = async (req: Request, res: Response) => {
 export const createTask = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
-    const { title, description, projectId, clientId, status, priority, dueDate, assignee } = req.body;
+    const role = (req as any).user?.role;
+    const { title, description, projectId, clientId, developerId, status, priority, dueDate, assignee, subtasks = [] } = req.body;
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (role !== "admin") {
+      return res.status(403).json({ message: "Only admins can create tasks" });
     }
 
     // Validate required fields
@@ -103,17 +134,52 @@ export const createTask = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Missing required field: title" });
     }
 
+    let resolvedClientId = clientId || null;
+    let resolvedDeveloperId = developerId || null;
+    let resolvedAssignee = assignee || "";
+    let resolvedProjectId = projectId || null;
+
+    if (projectId) {
+      const project = await Project.findOne({ _id: projectId, userId });
+      if (!project) {
+        return res.status(404).json({ message: "Project not found" });
+      }
+      resolvedProjectId = String(project._id);
+      resolvedClientId = resolvedClientId || String(project.clientId || "");
+      resolvedDeveloperId = resolvedDeveloperId || String(project.assignedDevId || "");
+    }
+
+    if (resolvedDeveloperId) {
+      const developer = await User.findOne({ _id: resolvedDeveloperId, role: "developer" });
+      if (!developer) {
+        return res.status(404).json({ message: "Assigned developer not found" });
+      }
+      resolvedAssignee = developer.name;
+    }
+
     const task = await Task.create({
       userId,
       title,
       description: description || "",
-      projectId: projectId || null,
-      clientId: clientId || null,
+      projectId: resolvedProjectId || null,
+      clientId: resolvedClientId || null,
+      developerId: resolvedDeveloperId || null,
       status: status || "pending",
       priority: priority || "medium",
       dueDate: dueDate ? new Date(dueDate) : null,
-      assignee: assignee || "",
+      assignee: resolvedAssignee,
+      subtasks,
     });
+
+    if (resolvedDeveloperId) {
+      await Notification.create({
+        recipientId: resolvedDeveloperId,
+        senderId: userId,
+        type: "task_assigned",
+        message: `You have been assigned a new task: ${title}`,
+        metadata: { taskId: task._id, projectId: resolvedProjectId },
+      });
+    }
 
     res.status(201).json({ success: true, data: task });
   } catch (error) {
@@ -126,17 +192,29 @@ export const createTask = async (req: Request, res: Response) => {
 export const updateTask = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
+    const role = (req as any).user?.role;
     const { id } = req.params;
-    const { title, description, projectId, clientId, status, priority, dueDate, assignee } = req.body;
+    const { title, description, projectId, clientId, developerId, status, priority, dueDate, assignee, completionNote, subtasks, comments } = req.body;
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const task = await Task.findOne({ _id: id, userId });
+    const scope =
+      role === "admin"
+        ? { _id: id, userId }
+        : role === "developer"
+          ? { _id: id, developerId: userId }
+          : { _id: id, clientId: userId };
+
+    const task = await Task.findOne(scope);
     
     if (!task) {
       return res.status(404).json({ message: "Task not found" });
+    }
+
+    if (role === "client") {
+      return res.status(403).json({ message: "Clients can only view tasks" });
     }
 
     const normalizedProjectId = normalizeNullableObjectId(projectId);
@@ -156,14 +234,42 @@ export const updateTask = async (req: Request, res: Response) => {
 
     if (title) task.title = title;
     if (description !== undefined) task.description = description;
-    if (normalizedProjectId.hasValue) task.projectId = normalizedProjectId.value;
-    if (normalizedClientId.hasValue) task.clientId = normalizedClientId.value;
+    if (role === "admin" && normalizedProjectId.hasValue) task.projectId = normalizedProjectId.value;
+    if (role === "admin" && normalizedClientId.hasValue) task.clientId = normalizedClientId.value;
+    if (role === "admin" && developerId !== undefined) {
+      task.developerId = developerId ? new mongoose.Types.ObjectId(String(developerId)) : null;
+    }
     if (status) task.status = status;
-    if (priority) task.priority = priority;
+    if (role === "admin" && priority) task.priority = priority;
     if (normalizedDueDate.hasValue) task.dueDate = normalizedDueDate.value;
-    if (assignee !== undefined) task.assignee = assignee;
+    if (role === "admin" && assignee !== undefined) task.assignee = assignee;
+    if (completionNote !== undefined) task.completionNote = completionNote;
+    if (subtasks !== undefined && role === "admin") task.subtasks = subtasks;
+    if (comments !== undefined && Array.isArray(comments)) task.set("comments", comments);
+    if (task.status === "completed" && !task.completedAt) {
+      task.completedAt = new Date();
+    }
+
+    if (role === "developer" && status && !["pending", "in-progress", "completed"].includes(status)) {
+      return res.status(400).json({ message: "Developers can only move tasks through the delivery workflow" });
+    }
 
     await task.save();
+
+    if (task.status === "completed") {
+      const recipients = [task.userId, task.clientId].filter(Boolean);
+      if (recipients.length > 0) {
+        await Notification.insertMany(
+          recipients.map((recipientId) => ({
+            recipientId,
+            senderId: userId,
+            type: "task_completed",
+            message: `${task.title} has been marked as completed`,
+            metadata: { taskId: task._id, projectId: task.projectId },
+          }))
+        );
+      }
+    }
 
     res.json({ success: true, data: task });
   } catch (error) {
@@ -176,10 +282,15 @@ export const updateTask = async (req: Request, res: Response) => {
 export const deleteTask = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
+    const role = (req as any).user?.role;
     const { id } = req.params;
 
     if (!userId) {
       return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (role !== "admin") {
+      return res.status(403).json({ message: "Only admins can delete tasks" });
     }
 
     const task = await Task.findOneAndDelete({ _id: id, userId });
@@ -192,5 +303,69 @@ export const deleteTask = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Delete task error:", error);
     res.status(500).json({ message: "Failed to delete task" });
+  }
+};
+
+// Bulk update task statuses (for Kanban drag-and-drop)
+export const bulkUpdateTaskStatus = async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const role = (req as any).user?.role;
+    const { updates } = req.body; // [{ id, status }]
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    if (!role || !["admin", "developer"].includes(role)) {
+      return res.status(403).json({ message: "Only admins and developers can bulk update tasks" });
+    }
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ message: "Updates array is required" });
+    }
+
+    const results = [];
+    for (const update of updates) {
+      const scope =
+        role === "admin"
+          ? { _id: update.id, userId }
+          : { _id: update.id, developerId: userId };
+
+      const task = await Task.findOne(scope);
+      if (!task) continue;
+
+      if (update.status) {
+        task.status = update.status;
+        if (update.status === "completed" && !task.completedAt) {
+          task.completedAt = new Date();
+        }
+      }
+
+      await task.save();
+
+      // Send notification if task is completed
+      if (task.status === "completed" && task.userId && task.clientId) {
+        const recipients = [task.userId, task.clientId].filter(Boolean);
+        if (recipients.length > 0) {
+          await Notification.insertMany(
+            recipients.map((recipientId) => ({
+              recipientId,
+              senderId: userId,
+              type: "task_completed",
+              message: `${task.title} has been marked as completed`,
+              metadata: { taskId: task._id, projectId: task.projectId },
+            }))
+          );
+        }
+      }
+
+      results.push({ id: update.id, success: true });
+    }
+
+    res.json({ success: true, data: results });
+  } catch (error) {
+    console.error("Bulk update tasks error:", error);
+    res.status(500).json({ message: "Failed to bulk update tasks" });
   }
 };

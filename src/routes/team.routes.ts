@@ -11,6 +11,12 @@ router.use(authMiddleware);
 // GET /api/team - Get all team members
 router.get('/', teamController.getAllTeamMembers.bind(teamController));
 
+// GET /api/team/role/:role - Get team by role
+router.get('/role/:role', teamController.getTeamByRole.bind(teamController));
+
+// GET /api/team/department/:department - Get team by department
+router.get('/department/:department', teamController.getTeamByDepartment.bind(teamController));
+
 // GET /api/team/:id - Get single team member
 router.get('/:id', teamController.getTeamMemberById.bind(teamController));
 
@@ -22,11 +28,5 @@ router.put('/:id', teamController.updateTeamMember.bind(teamController));
 
 // DELETE /api/team/:id - Delete team member
 router.delete('/:id', teamController.deleteTeamMember.bind(teamController));
-
-// GET /api/team/role/:role - Get team by role
-router.get('/role/:role', teamController.getTeamByRole.bind(teamController));
-
-// GET /api/team/department/:department - Get team by department
-router.get('/department/:department', teamController.getTeamByDepartment.bind(teamController));
 
 export default router;

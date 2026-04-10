@@ -24,6 +24,7 @@ const normalizeClientPayload = (body) => {
         company: String(body.company || "").trim(),
         address: String(body.address || "").trim(),
         status: (body.status === "inactive" ? "inactive" : "active"),
+        published: Boolean(body.published),
     };
 };
 const buildAdminOwnershipQuery = (adminId) => ({
@@ -61,7 +62,8 @@ const getClients = async (req, res) => {
     try {
         const adminId = getUserId(req);
         if (!adminId) {
-            return res.status(401).json({ message: "Unauthorized" });
+            const clients = await Client_1.Client.find({ published: true, status: "active" }).sort({ updatedAt: -1 }).limit(20);
+            return res.json({ success: true, data: clients });
         }
         const clients = await Client_1.Client.find(buildAdminOwnershipQuery(adminId)).sort({ createdAt: -1 });
         res.json({ success: true, data: clients });
@@ -96,7 +98,7 @@ exports.getClientById = getClientById;
 const createClient = async (req, res) => {
     try {
         const adminId = getUserId(req);
-        const { name, email, phone, company, address, status } = normalizeClientPayload(req.body);
+        const { name, email, phone, company, address, status, published } = normalizeClientPayload(req.body);
         if (!adminId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
@@ -137,6 +139,7 @@ const createClient = async (req, res) => {
                 isTemporaryPassword: true,
                 isApproved: true,
                 setupCompleted: false,
+                published,
             }, { new: true, runValidators: true })
             : await User_1.default.create({
                 name,
@@ -149,6 +152,7 @@ const createClient = async (req, res) => {
                 isTemporaryPassword: true,
                 isApproved: true,
                 setupCompleted: false,
+                published,
             });
         if (!newUser) {
             throw new Error("Failed to create or update client user");
@@ -163,6 +167,7 @@ const createClient = async (req, res) => {
             address: address || "",
             status: status || "active",
             customId,
+            published,
         });
         const emailSubject = "Your Websmith Client Account Credentials";
         const emailText = `
@@ -215,7 +220,7 @@ const updateClient = async (req, res) => {
     try {
         const adminId = getUserId(req);
         const { id } = req.params;
-        const { name, email, phone, company, address, status } = normalizeClientPayload(req.body);
+        const { name, email, phone, company, address, status, published } = normalizeClientPayload(req.body);
         if (!adminId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
@@ -240,7 +245,15 @@ const updateClient = async (req, res) => {
         client.company = company;
         client.address = address;
         client.status = status;
+        client.set("published", published);
         await client.save();
+        await User_1.default.findByIdAndUpdate(client.userId, {
+            name,
+            email,
+            phone,
+            company,
+            published,
+        });
         res.json({ success: true, data: client });
     }
     catch (error) {

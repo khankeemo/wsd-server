@@ -9,7 +9,8 @@ import {
   getTaskById,
   createTask,
   updateTask,
-  deleteTask
+  deleteTask,
+  bulkUpdateTaskStatus
 } from "../controllers/task.controller";
 
 const router = express.Router();
@@ -31,5 +32,8 @@ router.put("/:id", updateTask);
 
 // DELETE /api/tasks/:id - Delete task
 router.delete("/:id", deleteTask);
+
+// POST /api/tasks/bulk-status - Bulk update task statuses (for Kanban)
+router.post("/bulk-status", bulkUpdateTaskStatus);
 
 export default router;

@@ -53,6 +53,10 @@ const clientSchema = new mongoose.Schema(
       sparse: true,
       trim: true,
     },
+    published: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

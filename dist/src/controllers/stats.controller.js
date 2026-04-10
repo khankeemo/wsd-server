@@ -13,6 +13,7 @@ const Client_1 = require("../models/Client");
 const Task_1 = require("../models/Task");
 const Payment_1 = __importDefault(require("../models/Payment"));
 const Ticket_1 = __importDefault(require("../models/Ticket"));
+const User_1 = __importDefault(require("../models/User"));
 const getDashboardStats = async (req, res) => {
     try {
         const userId = req.userId;
@@ -27,25 +28,72 @@ const getDashboardStats = async (req, res) => {
         let totalClients = 0;
         let pendingTasks = 0;
         let totalRevenue = 0;
+        let totalDevelopers = 0;
+        let completedTasks = 0;
+        let activeProjects = 0;
+        let recentActivity = [];
         if (user.role === "admin") {
             totalProjects = await Project_1.Project.countDocuments({ userId });
-            totalClients = await UserlessClientCount(userId);
-            pendingTasks = await Task_1.Task.countDocuments({ userId, status: "pending" });
+            activeProjects = await Project_1.Project.countDocuments({ userId, status: { $in: ["pending", "in-progress"] } });
+            totalClients = await Client_1.Client.countDocuments({ adminId: userId });
+            totalDevelopers = await User_1.default.countDocuments({ role: "developer" });
+            pendingTasks = await Task_1.Task.countDocuments({ userId, status: { $in: ["pending", "in-progress"] } });
+            completedTasks = await Task_1.Task.countDocuments({ userId, status: "completed" });
             const payments = await Payment_1.default.find({ userId, status: "completed" });
             totalRevenue = payments.reduce((sum, payment) => sum + payment.amount, 0);
+            const [projects, tasks, clients] = await Promise.all([
+                Project_1.Project.find({ userId }).sort({ updatedAt: -1 }).limit(4).select("name updatedAt"),
+                Task_1.Task.find({ userId, status: "completed" }).sort({ updatedAt: -1 }).limit(4).select("title updatedAt"),
+                Client_1.Client.find({ adminId: userId }).sort({ createdAt: -1 }).limit(4).select("name createdAt"),
+            ]);
+            recentActivity = [
+                ...projects.map((project) => ({ id: String(project._id), type: "project", title: `Project updated: ${project.name}`, timestamp: project.updatedAt })),
+                ...tasks.map((task) => ({ id: String(task._id), type: "task", title: `Task completed: ${task.title}`, timestamp: task.updatedAt })),
+                ...clients.map((client) => ({ id: String(client._id), type: "client", title: `Client added: ${client.name}`, timestamp: client.createdAt })),
+            ]
+                .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+                .slice(0, 8);
         }
         else if (user.role === "client") {
             totalProjects = await Project_1.Project.countDocuments({ clientId: userId });
             totalClients = 1;
-            pendingTasks = await Ticket_1.default.countDocuments({ clientId: userId, status: { $ne: "resolved" } });
+            activeProjects = await Project_1.Project.countDocuments({ clientId: userId, status: { $in: ["pending", "in-progress"] } });
+            pendingTasks = await Task_1.Task.countDocuments({ clientId: userId, status: { $in: ["pending", "in-progress"] } });
+            completedTasks = await Task_1.Task.countDocuments({ clientId: userId, status: "completed" });
             const payments = await Payment_1.default.find({ clientId: userId, status: "completed" });
             totalRevenue = payments.reduce((sum, payment) => sum + payment.amount, 0);
+            const [projects, tasks, tickets] = await Promise.all([
+                Project_1.Project.find({ clientId: userId }).sort({ updatedAt: -1 }).limit(4).select("name updatedAt status"),
+                Task_1.Task.find({ clientId: userId, status: "completed" }).sort({ updatedAt: -1 }).limit(4).select("title updatedAt"),
+                Ticket_1.default.find({ clientId: userId }).sort({ updatedAt: -1 }).limit(4).select("subject updatedAt status"),
+            ]);
+            recentActivity = [
+                ...projects.map((project) => ({ id: String(project._id), type: "project", title: `Project ${project.name} is ${project.status}`, timestamp: project.updatedAt })),
+                ...tasks.map((task) => ({ id: String(task._id), type: "task", title: `Task completed: ${task.title}`, timestamp: task.updatedAt })),
+                ...tickets.map((ticket) => ({ id: String(ticket._id), type: "query", title: `Query ${ticket.subject} is ${ticket.status}`, timestamp: ticket.updatedAt })),
+            ]
+                .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+                .slice(0, 8);
         }
         else if (user.role === "developer") {
             totalProjects = await Project_1.Project.countDocuments({ assignedDevId: userId });
             totalClients = await Project_1.Project.distinct("clientId", { assignedDevId: userId }).then((ids) => ids.filter(Boolean).length);
-            pendingTasks = await Project_1.Project.countDocuments({ assignedDevId: userId, status: { $in: ["pending", "in-progress"] } });
+            activeProjects = await Project_1.Project.countDocuments({ assignedDevId: userId, status: { $in: ["pending", "in-progress"] } });
+            pendingTasks = await Task_1.Task.countDocuments({ developerId: userId, status: { $in: ["pending", "in-progress"] } });
+            completedTasks = await Task_1.Task.countDocuments({ developerId: userId, status: "completed" });
             totalRevenue = 0;
+            const [projects, tasks, tickets] = await Promise.all([
+                Project_1.Project.find({ assignedDevId: userId }).sort({ updatedAt: -1 }).limit(4).select("name updatedAt status"),
+                Task_1.Task.find({ developerId: userId }).sort({ updatedAt: -1 }).limit(4).select("title updatedAt status"),
+                Ticket_1.default.find({ developerId: userId }).sort({ updatedAt: -1 }).limit(4).select("subject updatedAt status"),
+            ]);
+            recentActivity = [
+                ...projects.map((project) => ({ id: String(project._id), type: "project", title: `Project ${project.name} is ${project.status}`, timestamp: project.updatedAt })),
+                ...tasks.map((task) => ({ id: String(task._id), type: "task", title: `Task ${task.title} is ${task.status}`, timestamp: task.updatedAt })),
+                ...tickets.map((ticket) => ({ id: String(ticket._id), type: "query", title: `Query ${ticket.subject} is ${ticket.status}`, timestamp: ticket.updatedAt })),
+            ]
+                .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+                .slice(0, 8);
         }
         res.json({
             success: true,
@@ -53,7 +101,11 @@ const getDashboardStats = async (req, res) => {
                 projects: totalProjects,
                 clients: totalClients,
                 tasks: pendingTasks,
-                revenue: totalRevenue
+                revenue: totalRevenue,
+                developers: totalDevelopers,
+                completedTasks,
+                activeProjects,
+                recentActivity,
             }
         });
     }
@@ -67,11 +119,3 @@ const getDashboardStats = async (req, res) => {
     }
 };
 exports.getDashboardStats = getDashboardStats;
-const UserlessClientCount = async (userId) => {
-    try {
-        return await Client_1.Client.countDocuments({ userId });
-    }
-    catch {
-        return 0;
-    }
-};

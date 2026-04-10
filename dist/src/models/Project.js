@@ -117,6 +117,7 @@ const projectSchema = new mongoose_1.Schema({
     customization: { type: customizationSchema, default: () => ({}) },
     activityLog: [activityLogSchema],
     statusUpdates: [statusUpdateSchema],
+    published: { type: Boolean, default: false },
 }, {
     timestamps: true,
     toJSON: { virtuals: true },

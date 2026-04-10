@@ -9,6 +9,14 @@ export interface ITicket extends Document {
   description: string;
   priority: "low" | "medium" | "high";
   status: "open" | "in_progress" | "resolved";
+  resolution?: string;
+  history: Array<{
+    action: string;
+    actorId?: mongoose.Types.ObjectId | null;
+    actorRole: "admin" | "client" | "developer" | "system";
+    message?: string;
+    createdAt: Date;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -30,6 +38,26 @@ const ticketSchema = new Schema<ITicket>(
       type: String,
       enum: ["open", "in_progress", "resolved"],
       default: "open",
+    },
+    resolution: { type: String, default: "" },
+    history: {
+      type: [
+        new Schema(
+          {
+            action: { type: String, required: true },
+            actorId: { type: Schema.Types.ObjectId, ref: "User", default: null },
+            actorRole: {
+              type: String,
+              enum: ["admin", "client", "developer", "system"],
+              default: "system",
+            },
+            message: { type: String, default: "" },
+            createdAt: { type: Date, default: Date.now },
+          },
+          { _id: true }
+        ),
+      ],
+      default: [],
     },
   },
   { timestamps: true }

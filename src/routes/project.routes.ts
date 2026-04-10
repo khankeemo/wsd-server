@@ -15,14 +15,18 @@ import {
   updateProjectStatus,
   getProjectStatus,
   getAllProjectsStatus,
+  getPublishedProjects,
   addMessage,
   getMessages,
   addFeedback,
   getFeedback,
-  updateCustomization
+  updateCustomization,
+  bulkUpdateProjectStatus
 } from "../controllers/project.controller";
 
 const router = express.Router();
+
+router.get("/public", getPublishedProjects);
 
 // All project routes require authentication
 router.use(authMiddleware);
@@ -88,5 +92,8 @@ router.get("/:id/feedback", getFeedback);
 
 // PUT /api/projects/:id/customization - Update project customization
 router.put("/:id/customization", updateCustomization);
+
+// POST /api/projects/bulk-status - Bulk update project statuses (for Kanban)
+router.post("/bulk-status", bulkUpdateProjectStatus);
 
 export default router;

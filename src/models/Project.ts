@@ -71,6 +71,7 @@ export interface IProject extends Document {
   customization: ICustomization;
   activityLog: IActivityLog[];
   statusUpdates: IStatusUpdate[];
+  published?: boolean;
   createdAt: Date;
   updatedAt: Date;
   // Virtuals
@@ -170,6 +171,7 @@ const projectSchema = new Schema<IProject>(
     customization: { type: customizationSchema, default: () => ({}) },
     activityLog: [activityLogSchema],
     statusUpdates: [statusUpdateSchema],
+    published: { type: Boolean, default: false },
   },
   {
     timestamps: true,

@@ -7,9 +7,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getAllProjectsStatus = exports.getProjectStatus = exports.updateCustomization = exports.updateProjectStatus = exports.getFeedback = exports.addFeedback = exports.getMessages = exports.addMessage = exports.updateProgress = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProjectById = exports.getProjects = void 0;
+exports.getPublishedProjects = exports.getAllProjectsStatus = exports.getProjectStatus = exports.updateCustomization = exports.updateProjectStatus = exports.getFeedback = exports.addFeedback = exports.getMessages = exports.addMessage = exports.updateProgress = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProjectById = exports.getProjects = void 0;
 const Project_1 = require("../models/Project");
 const User_1 = __importDefault(require("../models/User"));
+const Notification_1 = __importDefault(require("../models/Notification"));
 // Helper to get userId from request (set by auth middleware)
 const getUserId = (req) => {
     return req.userId || req.user?.id;
@@ -44,6 +45,7 @@ const mapProjectResponse = (project) => ({
     assignedDeveloperEmail: project.assignedDevId?.email || "",
     clientUserName: project.clientId?.name || project.client,
     clientUserEmail: project.clientId?.email || project.clientEmail,
+    published: Boolean(project.published),
 });
 // ============================================================
 // BASIC CRUD FUNCTIONS
@@ -97,7 +99,7 @@ exports.getProjectById = getProjectById;
 const createProject = async (req, res) => {
     try {
         const userId = getUserId(req);
-        const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId } = req.body;
+        const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, published } = req.body;
         const role = req.user?.role;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
@@ -137,6 +139,7 @@ const createProject = async (req, res) => {
             feedback: [],
             customization: { buttonColor: "#007AFF", theme: "light" },
             activityLog: [{ action: "Project created", user: userId, timestamp: new Date() }],
+            published: Boolean(published),
             statusUpdates: [{
                     status: status || "pending",
                     progress: 0,
@@ -160,7 +163,7 @@ const updateProject = async (req, res) => {
     try {
         const userId = getUserId(req);
         const { id } = req.params;
-        const { name, description, client, clientId, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId } = req.body;
+        const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, published } = req.body;
         const role = req.user?.role;
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
@@ -210,6 +213,8 @@ const updateProject = async (req, res) => {
         }
         if (budget !== undefined)
             project.budget = budget;
+        if (published !== undefined)
+            project.published = Boolean(published);
         project.activityLog.push({
             action: "Project updated",
             user: userId,
@@ -447,6 +452,16 @@ const updateProjectStatus = async (req, res) => {
             timestamp: new Date()
         });
         await project.save();
+        const recipients = [project.clientId, project.assignedDevId].filter(Boolean);
+        if (recipients.length > 0) {
+            await Notification_1.default.insertMany(recipients.map((recipientId) => ({
+                recipientId,
+                senderId: userId,
+                type: "project_status_changed",
+                message: `${project.name} is now ${project.status.replace("-", " ")}`,
+                metadata: { projectId: project._id, status: project.status, progress: project.progress },
+            })));
+        }
         await project.populate("clientId", "name email");
         await project.populate("assignedDevId", "name email");
         res.json({ success: true, data: mapProjectResponse(project) });
@@ -576,3 +591,17 @@ const getAllProjectsStatus = async (req, res) => {
     }
 };
 exports.getAllProjectsStatus = getAllProjectsStatus;
+const getPublishedProjects = async (_req, res) => {
+    try {
+        const projects = await Project_1.Project.find({ published: true, status: { $ne: "on-hold" } })
+            .select("name description client progress status projectType expectedCompletionDate published")
+            .sort({ updatedAt: -1 })
+            .limit(12);
+        res.json({ success: true, data: projects });
+    }
+    catch (error) {
+        console.error("Get published projects error:", error);
+        res.status(500).json({ message: "Failed to fetch public projects" });
+    }
+};
+exports.getPublishedProjects = getPublishedProjects;

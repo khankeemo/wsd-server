@@ -1,7 +1,7 @@
 // PATH: C:\wsd-server\src\models\User.ts
 // User Model - User schema for authentication and profile
 
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Document, Schema } from "mongoose";
 
 export interface IUser extends Document {
   name: string;
@@ -9,7 +9,7 @@ export interface IUser extends Document {
   password: string;
   phone?: string;
   company?: string;
-  role: 'admin' | 'client' | 'developer';
+  role: "admin" | "client" | "developer";
   avatar?: string;
   preferences: {
     theme: "light" | "dark";
@@ -18,13 +18,20 @@ export interface IUser extends Document {
       push: boolean;
     };
   };
-  provider?: string;
+  provider?: string | null;
   providerId?: string;
   isOAuthUser: boolean;
   customId?: string;
   isTemporaryPassword?: boolean;
   isApproved?: boolean;
   setupCompleted?: boolean;
+  published?: boolean;
+  headline?: string;
+  bio?: string;
+  skills?: string[];
+  status?: "active" | "inactive" | "on-leave";
+  experienceYears?: number;
+  joinedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -33,45 +40,45 @@ const UserSchema = new Schema<IUser>(
   {
     name: {
       type: String,
-      required: [true, 'Name is required'],
+      required: [true, "Name is required"],
       trim: true,
     },
     email: {
       type: String,
-      required: [true, 'Email is required'],
+      required: [true, "Email is required"],
       unique: true,
       lowercase: true,
       trim: true,
     },
     password: {
       type: String,
-      required: [true, 'Password is required'],
+      required: [true, "Password is required"],
       minlength: 6,
     },
     phone: {
       type: String,
       trim: true,
-      default: '',
+      default: "",
     },
     company: {
       type: String,
       trim: true,
-      default: '',
+      default: "",
     },
     role: {
       type: String,
-      enum: ['admin', 'client', 'developer'],
-      default: 'client',
+      enum: ["admin", "client", "developer"],
+      default: "client",
     },
     avatar: {
       type: String,
-      default: '',
+      default: "",
     },
     preferences: {
       theme: {
         type: String,
-        enum: ['light', 'dark'],
-        default: 'light',
+        enum: ["light", "dark"],
+        default: "light",
       },
       notifications: {
         email: { type: Boolean, default: true },
@@ -80,12 +87,12 @@ const UserSchema = new Schema<IUser>(
     },
     provider: {
       type: String,
-      enum: ['google', 'yahoo', null],
+      enum: ["google", "yahoo", null],
       default: null,
     },
     providerId: {
       type: String,
-      default: '',
+      default: "",
     },
     isOAuthUser: {
       type: Boolean,
@@ -95,6 +102,7 @@ const UserSchema = new Schema<IUser>(
       type: String,
       unique: true,
       sparse: true,
+      trim: true,
     },
     isTemporaryPassword: {
       type: Boolean,
@@ -108,10 +116,43 @@ const UserSchema = new Schema<IUser>(
       type: Boolean,
       default: true,
     },
+    published: {
+      type: Boolean,
+      default: false,
+    },
+    headline: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    bio: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 500,
+    },
+    skills: {
+      type: [String],
+      default: [],
+    },
+    status: {
+      type: String,
+      enum: ["active", "inactive", "on-leave"],
+      default: "active",
+    },
+    experienceYears: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    joinedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-export default mongoose.model<IUser>('User', UserSchema);
+export default mongoose.model<IUser>("User", UserSchema);
