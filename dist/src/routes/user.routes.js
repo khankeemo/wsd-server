@@ -15,6 +15,10 @@ router.use(auth_middleware_1.authMiddleware);
 // GET /api/users/me - Get current user profile
 router.get('/me', user_controller_1.default.getCurrentUser.bind(user_controller_1.default));
 router.get('/role/:role', (0, role_middleware_1.requireRoles)('admin'), user_controller_1.default.getUsersByRole.bind(user_controller_1.default));
+router.get('/notifications', user_controller_1.default.getMyNotifications.bind(user_controller_1.default));
+router.patch('/notifications/:id/read', user_controller_1.default.markMyNotificationRead.bind(user_controller_1.default));
+router.post('/managed', (0, role_middleware_1.requireRoles)('admin'), user_controller_1.default.createManagedUser.bind(user_controller_1.default));
+router.delete('/managed/:id', (0, role_middleware_1.requireRoles)('admin'), user_controller_1.default.deleteManagedUser.bind(user_controller_1.default));
 // PUT /api/users/update - Update user profile
 router.put('/update', user_controller_1.default.updateUserProfile.bind(user_controller_1.default));
 // POST /api/users/change-password - Change password

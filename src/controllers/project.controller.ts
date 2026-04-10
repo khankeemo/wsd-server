@@ -6,6 +6,7 @@
 import { Request, Response } from "express";
 import { Project } from "../models/Project";
 import User from "../models/User";
+import Notification from "../models/Notification";
 
 // Helper to get userId from request (set by auth middleware)
 const getUserId = (req: Request): string | undefined => {
@@ -52,6 +53,24 @@ const mapProjectResponse = (project: any) => ({
   clientUserName: project.clientId?.name || project.client,
   clientUserEmail: project.clientId?.email || project.clientEmail,
 });
+
+const createClientAssignmentNotification = async (project: any) => {
+  if (!project?.clientId?._id) {
+    return;
+  }
+
+  const hasDeveloper = Boolean(project.assignedDevId?._id || project.assignedDevId);
+  const message = hasDeveloper
+    ? `Project "${project.name}" has been assigned and is now moving forward with a developer.`
+    : `Project "${project.name}" is currently not assigned to a developer yet.`;
+
+  await Notification.create({
+    recipientId: project.clientId._id,
+    senderId: project.userId,
+    type: hasDeveloper ? "project_assignment_assigned" : "project_assignment_unassigned",
+    message,
+  });
+};
 
 // ============================================================
 // BASIC CRUD FUNCTIONS
@@ -170,6 +189,7 @@ export const createProject = async (req: Request, res: Response) => {
 
     await project.populate("clientId", "name email");
     await project.populate("assignedDevId", "name email");
+    await createClientAssignmentNotification(project);
 
     res.status(201).json({ success: true, data: mapProjectResponse(project) });
   } catch (error) {
@@ -214,6 +234,9 @@ export const updateProject = async (req: Request, res: Response) => {
       project.clientId = clientUser._id;
     }
 
+    const previousAssignedDevId = project.assignedDevId ? String(project.assignedDevId) : "";
+    const previousClientId = project.clientId ? String(project.clientId) : "";
+
     if (assignedDevId !== undefined) project.assignedDevId = assignedDevId || null;
     if (clientEmail !== undefined) project.clientEmail = clientEmail;
     if (clientPhone !== undefined) project.clientPhone = clientPhone;
@@ -238,6 +261,17 @@ export const updateProject = async (req: Request, res: Response) => {
 
     await project.populate("clientId", "name email");
     await project.populate("assignedDevId", "name email");
+
+    const nextAssignedDevId = project.assignedDevId?._id
+      ? String(project.assignedDevId._id)
+      : project.assignedDevId
+        ? String(project.assignedDevId)
+        : "";
+    const nextClientId = project.clientId?._id ? String(project.clientId._id) : String(project.clientId || "");
+
+    if (previousAssignedDevId !== nextAssignedDevId || previousClientId !== nextClientId) {
+      await createClientAssignmentNotification(project);
+    }
 
     res.json({ success: true, data: mapProjectResponse(project) });
   } catch (error) {

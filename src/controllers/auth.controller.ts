@@ -43,7 +43,8 @@ export const register = async (req: Request, res: Response) => {
         id: user._id, 
         name: user.name, 
         email: user.email,
-        role: user.role 
+        role: user.role,
+        adminLevel: user.role === "admin" ? (user.adminLevel || "super") : null,
       } 
     });
   } catch (err) {
@@ -102,6 +103,7 @@ export const login = async (req: Request, res: Response) => {
         name: user.name, 
         email: user.email,
         role: user.role,
+        adminLevel: user.role === "admin" ? (user.adminLevel || "super") : null,
         isTemporaryPassword: user.isTemporaryPassword,
         setupCompleted: user.setupCompleted,
         isApproved: user.isApproved

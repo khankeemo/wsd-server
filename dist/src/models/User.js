@@ -69,6 +69,11 @@ const UserSchema = new mongoose_1.Schema({
         enum: ['admin', 'client', 'developer'],
         default: 'client',
     },
+    adminLevel: {
+        type: String,
+        enum: ['super', 'sub', null],
+        default: null,
+    },
     avatar: {
         type: String,
         default: '',

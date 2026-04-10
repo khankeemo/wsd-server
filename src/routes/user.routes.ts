@@ -15,6 +15,10 @@ router.use(authMiddleware);
 router.get('/me', userController.getCurrentUser.bind(userController));
 
 router.get('/role/:role', requireRoles('admin'), userController.getUsersByRole.bind(userController));
+router.get('/notifications', userController.getMyNotifications.bind(userController));
+router.patch('/notifications/:id/read', userController.markMyNotificationRead.bind(userController));
+router.post('/managed', requireRoles('admin'), userController.createManagedUser.bind(userController));
+router.delete('/managed/:id', requireRoles('admin'), userController.deleteManagedUser.bind(userController));
 
 // PUT /api/users/update - Update user profile
 router.put('/update', userController.updateUserProfile.bind(userController));

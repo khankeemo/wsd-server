@@ -10,6 +10,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAllProjectsStatus = exports.getProjectStatus = exports.updateCustomization = exports.updateProjectStatus = exports.getFeedback = exports.addFeedback = exports.getMessages = exports.addMessage = exports.updateProgress = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProjectById = exports.getProjects = void 0;
 const Project_1 = require("../models/Project");
 const User_1 = __importDefault(require("../models/User"));
+const Notification_1 = __importDefault(require("../models/Notification"));
 // Helper to get userId from request (set by auth middleware)
 const getUserId = (req) => {
     return req.userId || req.user?.id;
@@ -45,6 +46,21 @@ const mapProjectResponse = (project) => ({
     clientUserName: project.clientId?.name || project.client,
     clientUserEmail: project.clientId?.email || project.clientEmail,
 });
+const createClientAssignmentNotification = async (project) => {
+    if (!project?.clientId?._id) {
+        return;
+    }
+    const hasDeveloper = Boolean(project.assignedDevId?._id || project.assignedDevId);
+    const message = hasDeveloper
+        ? `Project "${project.name}" has been assigned and is now moving forward with a developer.`
+        : `Project "${project.name}" is currently not assigned to a developer yet.`;
+    await Notification_1.default.create({
+        recipientId: project.clientId._id,
+        senderId: project.userId,
+        type: hasDeveloper ? "project_assignment_assigned" : "project_assignment_unassigned",
+        message,
+    });
+};
 // ============================================================
 // BASIC CRUD FUNCTIONS
 // ============================================================
@@ -147,6 +163,7 @@ const createProject = async (req, res) => {
         });
         await project.populate("clientId", "name email");
         await project.populate("assignedDevId", "name email");
+        await createClientAssignmentNotification(project);
         res.status(201).json({ success: true, data: mapProjectResponse(project) });
     }
     catch (error) {
@@ -187,6 +204,8 @@ const updateProject = async (req, res) => {
             project.customClientId = customClientId;
             project.clientId = clientUser._id;
         }
+        const previousAssignedDevId = project.assignedDevId ? String(project.assignedDevId) : "";
+        const previousClientId = project.clientId ? String(project.clientId) : "";
         if (assignedDevId !== undefined)
             project.assignedDevId = assignedDevId || null;
         if (clientEmail !== undefined)
@@ -218,6 +237,15 @@ const updateProject = async (req, res) => {
         await project.save();
         await project.populate("clientId", "name email");
         await project.populate("assignedDevId", "name email");
+        const nextAssignedDevId = project.assignedDevId?._id
+            ? String(project.assignedDevId._id)
+            : project.assignedDevId
+                ? String(project.assignedDevId)
+                : "";
+        const nextClientId = project.clientId?._id ? String(project.clientId._id) : String(project.clientId || "");
+        if (previousAssignedDevId !== nextAssignedDevId || previousClientId !== nextClientId) {
+            await createClientAssignmentNotification(project);
+        }
         res.json({ success: true, data: mapProjectResponse(project) });
     }
     catch (error) {
