@@ -1,9 +1,9 @@
 import { Request, Response } from "express";
 import Ticket from "../models/Ticket";
 import { Project } from "../models/Project";
-import Notification from "../models/Notification";
 import User from "../models/User";
-import { sendEmail, isEmailConfigured } from "../services/email.service";
+import Notification from "../models/Notification";
+import { sendEmail, isEmailConfigured, escapeHtml } from "../services/email.service";
 
 const getTicketScope = (req: Request) => {
   const user = (req as any).user;
@@ -70,17 +70,66 @@ export const createTicket = async (req: Request, res: Response) => {
       ],
     });
 
-    const recipients = [ticket.adminId, ticket.developerId].filter(Boolean);
-    if (recipients.length > 0) {
+    const client = await User.findById(userId).select("name email");
+    const admins = await User.find({ role: "admin" }).select("_id name email");
+
+    if (admins.length > 0 && client) {
+      const projectLabel = project?.name || "General support";
+      const notificationMessage = `New client query from ${client.name}: "${subject}" for ${projectLabel}.`;
+
       await Notification.insertMany(
-        recipients.map((recipientId) => ({
-          recipientId,
+        admins.map((admin) => ({
+          recipientId: admin._id,
           senderId: userId,
           type: "query_created",
-          message: `New query raised: ${subject}`,
-          metadata: { ticketId: ticket._id, projectId: ticket.projectId, priority: ticket.priority },
+          message: notificationMessage,
         }))
       );
+
+      const emailRecipients = [
+        ...new Set(
+          admins
+            .map((admin) => admin.email)
+            .filter(Boolean)
+            .concat(process.env.ADMIN_NOTIFICATION_EMAIL ? [process.env.ADMIN_NOTIFICATION_EMAIL] : [])
+        ),
+      ];
+
+      if (emailRecipients.length > 0) {
+        const safeDescription = escapeHtml(description);
+        const safeSubject = escapeHtml(subject);
+        const safeClientName = escapeHtml(client.name);
+        const safeProjectLabel = escapeHtml(projectLabel);
+        const emailSubject = `Client Query: ${subject}`;
+        const emailText = `
+          A new client query has been submitted.
+
+          Client: ${client.name}
+          Client Email: ${client.email}
+          Project: ${projectLabel}
+          Subject: ${subject}
+          Priority: ${priority || "medium"}
+
+          ${description}
+        `;
+        const emailHtml = `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e5ea; border-radius: 12px;">
+            <h2 style="color: #007AFF;">New Client Query</h2>
+            <p><strong>Client:</strong> ${safeClientName}</p>
+            <p><strong>Client Email:</strong> ${escapeHtml(client.email)}</p>
+            <p><strong>Project:</strong> ${safeProjectLabel}</p>
+            <p><strong>Subject:</strong> ${safeSubject}</p>
+            <p><strong>Priority:</strong> ${escapeHtml(priority || "medium")}</p>
+            <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin-top: 16px; white-space: pre-wrap;">${safeDescription}</div>
+          </div>
+        `;
+
+        try {
+          await sendEmail(emailRecipients.join(","), emailSubject, emailText, emailHtml);
+        } catch (emailError) {
+          console.error("Client query email failed:", emailError);
+        }
+      }
     }
 
     res.status(201).json({ success: true, data: ticket });
@@ -182,12 +231,11 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
   }
 };
 
-// Bulk update ticket statuses (for Kanban drag-and-drop)
 export const bulkUpdateTicketStatus = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const userId = (req as any).userId;
-    const { updates } = req.body; // [{ id, status }]
+    const { updates } = req.body;
 
     if (!user || !userId) {
       return res.status(401).json({ success: false, message: "Unauthorized" });
@@ -222,7 +270,6 @@ export const bulkUpdateTicketStatus = async (req: Request, res: Response) => {
 
       await ticket.save();
 
-      // Send notification to client
       await Notification.create({
         recipientId: ticket.clientId,
         senderId: userId,
@@ -238,5 +285,47 @@ export const bulkUpdateTicketStatus = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Bulk update tickets error:", error);
     res.status(500).json({ success: false, message: "Failed to bulk update tickets" });
+  }
+};
+
+export const sendResolutionEmail = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const userId = (req as any).userId;
+    const { id } = req.params;
+    const { resolution } = req.body;
+
+    if (!user || !userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const ticket = await Ticket.findById(id).populate("clientId", "name email");
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: "Ticket not found" });
+    }
+
+    const client = ticket.clientId as any;
+    if (!client?.email) {
+      return res.status(400).json({ success: false, message: "Client email not available" });
+    }
+
+    const emailSubject = `Query Resolved: ${ticket.subject}`;
+    const emailText = resolution || `Your query has been resolved.`;
+    const emailHtml = `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: #34C759;">Query Resolved</h2>
+        <p>Your query <strong>${ticket.subject}</strong> has been resolved.</p>
+        <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin-top: 16px;">
+          ${resolution || "No additional details provided."}
+        </div>
+      </div>
+    `;
+
+    await sendEmail(client.email, emailSubject, emailText, emailHtml);
+
+    res.json({ success: true, message: "Resolution email sent successfully" });
+  } catch (error) {
+    console.error("Send resolution email error:", error);
+    res.status(500).json({ success: false, message: "Failed to send resolution email" });
   }
 };

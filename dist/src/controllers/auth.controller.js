@@ -37,7 +37,8 @@ const register = async (req, res) => {
                 id: user._id,
                 name: user.name,
                 email: user.email,
-                role: user.role
+                role: user.role,
+                adminLevel: user.role === "admin" ? (user.adminLevel || "super") : null,
             }
         });
     }
@@ -86,6 +87,7 @@ const login = async (req, res) => {
                 name: user.name,
                 email: user.email,
                 role: user.role,
+                adminLevel: user.role === "admin" ? (user.adminLevel || "super") : null,
                 isTemporaryPassword: user.isTemporaryPassword,
                 setupCompleted: user.setupCompleted,
                 isApproved: user.isApproved

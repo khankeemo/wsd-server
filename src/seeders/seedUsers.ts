@@ -11,6 +11,7 @@ type SeedUser = {
   email: string;
   password: string;
   role: "admin" | "client" | "developer";
+  adminLevel?: "super" | "sub" | null;
   phone?: string;
   company?: string;
 };
@@ -21,6 +22,7 @@ const seedUsers: SeedUser[] = [
     email: process.env.SEED_ADMIN_EMAIL || "admin@wsd.com",
     password: process.env.SEED_ADMIN_PASSWORD || "admin123",
     role: "admin",
+    adminLevel: "super",
     company: "WSD",
   },
   {
@@ -52,6 +54,7 @@ const seed = async () => {
         email: user.email.toLowerCase(),
         password: await bcrypt.hash(user.password, 10),
         role: user.role,
+        adminLevel: user.role === "admin" ? user.adminLevel || "super" : null,
         phone: user.phone || "",
         company: user.company || "",
         isOAuthUser: false,

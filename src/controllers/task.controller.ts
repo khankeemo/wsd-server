@@ -369,3 +369,89 @@ export const bulkUpdateTaskStatus = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Failed to bulk update tasks" });
   }
 };
+
+export const addTaskComment = async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const user = (req as any).user;
+    const { id } = req.params;
+    const { content } = req.body;
+
+    if (!userId || !content) {
+      return res.status(400).json({ message: "Content is required" });
+    }
+
+    const task = await Task.findById(id);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    task.comments.push({
+      userId: new mongoose.Types.ObjectId(userId),
+      authorName: user?.name || "Unknown",
+      content,
+      createdAt: new Date(),
+    });
+
+    await task.save();
+
+    res.json({ success: true, data: task.comments });
+  } catch (error) {
+    console.error("Add task comment error:", error);
+    res.status(500).json({ message: "Failed to add comment" });
+  }
+};
+
+export const toggleSubtask = async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const { id, subtaskId } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const task = await Task.findById(id);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    const subtask = task.subtasks.id(subtaskId);
+    if (!subtask) {
+      return res.status(404).json({ message: "Subtask not found" });
+    }
+
+    subtask.completed = !subtask.completed;
+    await task.save();
+
+    res.json({ success: true, data: task.subtasks });
+  } catch (error) {
+    console.error("Toggle subtask error:", error);
+    res.status(500).json({ message: "Failed to toggle subtask" });
+  }
+};
+
+export const addSubtask = async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+    const { title } = req.body;
+
+    if (!userId || !title) {
+      return res.status(400).json({ message: "Title is required" });
+    }
+
+    const task = await Task.findById(id);
+    if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+
+    task.subtasks.push({ title, completed: false } as any);
+    await task.save();
+
+    res.json({ success: true, data: task.subtasks });
+  } catch (error) {
+    console.error("Add subtask error:", error);
+    res.status(500).json({ message: "Failed to add subtask" });
+  }
+};

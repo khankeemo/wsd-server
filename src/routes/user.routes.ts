@@ -21,6 +21,10 @@ router.patch('/notifications/:id/read', userController.markNotificationRead.bind
 router.post('/notifications/mark-all-read', userController.markAllNotificationsRead.bind(userController));
 
 router.get('/role/:role', requireRoles('admin'), userController.getUsersByRole.bind(userController));
+router.get('/notifications', userController.getMyNotifications.bind(userController));
+router.patch('/notifications/:id/read', userController.markMyNotificationRead.bind(userController));
+router.post('/managed', requireRoles('admin'), userController.createManagedUser.bind(userController));
+router.delete('/managed/:id', requireRoles('admin'), userController.deleteManagedUser.bind(userController));
 
 router.get('/developers', requireRoles('admin'), userController.getDevelopers.bind(userController));
 router.post('/developers', requireRoles('admin'), userController.createDeveloper.bind(userController));

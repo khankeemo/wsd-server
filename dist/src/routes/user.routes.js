@@ -22,6 +22,10 @@ router.get('/developers', (0, role_middleware_1.requireRoles)('admin'), user_con
 router.post('/developers', (0, role_middleware_1.requireRoles)('admin'), user_controller_1.default.createDeveloper.bind(user_controller_1.default));
 router.put('/developers/:id', (0, role_middleware_1.requireRoles)('admin'), user_controller_1.default.updateDeveloper.bind(user_controller_1.default));
 router.delete('/developers/:id', (0, role_middleware_1.requireRoles)('admin'), user_controller_1.default.deleteDeveloper.bind(user_controller_1.default));
+router.get('/notifications', user_controller_1.default.getMyNotifications.bind(user_controller_1.default));
+router.patch('/notifications/:id/read', user_controller_1.default.markMyNotificationRead.bind(user_controller_1.default));
+router.post('/managed', (0, role_middleware_1.requireRoles)('admin'), user_controller_1.default.createManagedUser.bind(user_controller_1.default));
+router.delete('/managed/:id', (0, role_middleware_1.requireRoles)('admin'), user_controller_1.default.deleteManagedUser.bind(user_controller_1.default));
 // PUT /api/users/update - Update user profile
 router.put('/update', user_controller_1.default.updateUserProfile.bind(user_controller_1.default));
 // POST /api/users/change-password - Change password

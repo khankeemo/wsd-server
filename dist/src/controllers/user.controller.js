@@ -11,41 +11,6 @@ exports.UserController = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const User_1 = __importDefault(require("../models/User"));
-const Notification_1 = __importDefault(require("../models/Notification"));
-const email_service_1 = require("../services/email.service");
-const buildUserResponse = (user) => ({
-    id: user._id,
-    _id: user._id,
-    name: user.name,
-    email: user.email,
-    phone: user.phone || "",
-    company: user.company || "",
-    role: user.role || "client",
-    avatar: user.avatar || "",
-    customId: user.customId || "",
-    published: user.published || false,
-    headline: user.headline || "",
-    bio: user.bio || "",
-    skills: user.skills || [],
-    status: user.status || "active",
-    experienceYears: user.experienceYears || 0,
-    joinedAt: user.joinedAt || null,
-    isTemporaryPassword: user.isTemporaryPassword,
-    setupCompleted: user.setupCompleted,
-    preferences: user.preferences || { theme: "light", notifications: { email: true, push: true } },
-    createdAt: user.createdAt,
-    updatedAt: user.updatedAt,
-});
-const developerCustomId = async () => {
-    let next = await User_1.default.countDocuments({ role: "developer" });
-    while (true) {
-        next += 1;
-        const candidate = `DEV-${String(next).padStart(4, "0")}`;
-        const exists = await User_1.default.exists({ customId: candidate });
-        if (!exists)
-            return candidate;
-    }
-};
 class UserController {
     async getCurrentUser(req, res) {
         try {
@@ -59,33 +24,52 @@ class UserController {
                 res.status(404).json({ success: false, message: "User not found" });
                 return;
             }
-            res.status(200).json({ success: true, user: buildUserResponse(user) });
+            res.status(200).json({
+                success: true,
+                user: {
+                    id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone || '',
+                    company: user.company || '',
+                    role: user.role || 'client',
+                    avatar: user.avatar || '',
+                    preferences: user.preferences || { theme: 'light', notifications: { email: true, push: true } },
+                    createdAt: user.createdAt,
+                }
+            });
         }
         catch (error) {
             console.error("Get current user error:", error);
             res.status(500).json({ success: false, message: "Server error - Could not fetch user profile" });
         }
     }
+    /**
+     * Update user profile
+     * PUT /api/users/profile
+     * Requires: Authentication token
+     * Body: { name?, email?, phone?, company?, preferences? }
+     */
     async updateUserProfile(req, res) {
         try {
             const userId = req.userId;
-            const { name, email, phone, company, preferences, avatar, headline, bio, skills } = req.body;
+            const { name, email, phone, company, preferences } = req.body;
             if (!userId) {
                 res.status(401).json({ success: false, message: "Unauthorized" });
                 return;
             }
-            const updatedUser = await User_1.default.findByIdAndUpdate(userId, {
-                ...(name !== undefined ? { name } : {}),
-                ...(email !== undefined ? { email } : {}),
-                ...(phone !== undefined ? { phone } : {}),
-                ...(company !== undefined ? { company } : {}),
-                ...(preferences !== undefined ? { preferences } : {}),
-                ...(avatar !== undefined ? { avatar } : {}),
-                ...(headline !== undefined ? { headline } : {}),
-                ...(bio !== undefined ? { bio } : {}),
-                ...(skills !== undefined ? { skills } : {}),
-                updatedAt: new Date(),
-            }, { new: true, runValidators: true }).select("-password");
+            const updateData = {};
+            if (name)
+                updateData.name = name;
+            if (email)
+                updateData.email = email;
+            if (phone)
+                updateData.phone = phone;
+            if (company)
+                updateData.company = company;
+            if (preferences)
+                updateData.preferences = preferences;
+            const updatedUser = await User_1.default.findByIdAndUpdate(userId, { ...updateData, updatedAt: new Date() }, { new: true, runValidators: true }).select('-password');
             if (!updatedUser) {
                 res.status(404).json({ success: false, message: "User not found" });
                 return;
@@ -170,29 +154,8 @@ class UserController {
                 res.status(409).json({ success: false, message: "A user with this email already exists" });
                 return;
             }
-            const tempPassword = crypto_1.default.randomBytes(4).toString("hex");
-            const developer = await User_1.default.create({
-                name,
-                email: String(email).toLowerCase(),
-                password: await bcryptjs_1.default.hash(tempPassword, 10),
-                phone: phone || "",
-                company: company || "",
-                role: "developer",
-                customId: await developerCustomId(),
-                isTemporaryPassword: true,
-                setupCompleted: false,
-                skills,
-                headline,
-                bio,
-                experienceYears: Number(experienceYears) || 0,
-                status,
-                joinedAt: joinedAt ? new Date(joinedAt) : null,
-                published: Boolean(published),
-            });
-            if ((0, email_service_1.isEmailConfigured)()) {
-                await (0, email_service_1.sendEmail)(developer.email, "Your Websmith developer account", `Developer ID: ${developer.customId}\nTemporary Password: ${tempPassword}`, `<p>Your Websmith developer account is ready.</p><p><strong>Developer ID:</strong> ${developer.customId}</p><p><strong>Temporary Password:</strong> ${tempPassword}</p>`);
-            }
-            res.status(201).json({
+            const users = await User_1.default.find({ role }).select('_id name email role company');
+            res.status(200).json({
                 success: true,
                 data: buildUserResponse(developer),
                 temporaryPassword: (0, email_service_1.isEmailConfigured)() ? undefined : tempPassword,
@@ -282,6 +245,175 @@ class UserController {
         catch (error) {
             console.error("Mark notification read error:", error);
             res.status(500).json({ success: false, message: "Failed to update notification" });
+        }
+    }
+    async getMyNotifications(req, res) {
+        try {
+            const userId = req.userId;
+            if (!userId) {
+                res.status(401).json({ success: false, message: 'Unauthorized' });
+                return;
+            }
+            const notifications = await Notification_1.default.find({ recipientId: userId })
+                .sort({ createdAt: -1 })
+                .limit(50);
+            res.status(200).json({ success: true, data: notifications });
+        }
+        catch (error) {
+            console.error('Get my notifications error:', error);
+            res.status(500).json({ success: false, message: 'Failed to fetch notifications' });
+        }
+    }
+    async markMyNotificationRead(req, res) {
+        try {
+            const userId = req.userId;
+            const { id } = req.params;
+            if (!userId) {
+                res.status(401).json({ success: false, message: 'Unauthorized' });
+                return;
+            }
+            await Notification_1.default.findOneAndUpdate({ _id: id, recipientId: userId }, { isRead: true });
+            res.status(200).json({ success: true, message: 'Notification marked as read' });
+        }
+        catch (error) {
+            console.error('Mark my notification read error:', error);
+            res.status(500).json({ success: false, message: 'Failed to update notification' });
+        }
+    }
+    async createManagedUser(req, res) {
+        try {
+            const requester = req.user;
+            const { role } = req.body;
+            const { name, email, phone, company } = normalizeManagedUserPayload(req.body);
+            if (!isAdmin(requester)) {
+                res.status(403).json({ success: false, message: 'Forbidden' });
+                return;
+            }
+            if (!['admin', 'developer'].includes(role)) {
+                res.status(400).json({ success: false, message: 'Only admin and developer accounts can be created here' });
+                return;
+            }
+            if (role === 'admin' && !isSuperAdmin(requester)) {
+                res.status(403).json({ success: false, message: 'Only super admin can add another admin' });
+                return;
+            }
+            if (!name || !email) {
+                res.status(400).json({ success: false, message: 'Missing required fields: name, email' });
+                return;
+            }
+            if (!(0, email_service_1.isEmailConfigured)()) {
+                res.status(500).json({
+                    success: false,
+                    message: 'Account email is not configured on the server. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, and SMTP_FROM in the backend deployment environment.',
+                });
+                return;
+            }
+            const existingUser = await User_1.default.findOne({ email });
+            if (existingUser) {
+                res.status(409).json({ success: false, message: 'A user with this email already exists' });
+                return;
+            }
+            const generatedPassword = crypto_1.default.randomBytes(5).toString('hex');
+            const hashedPassword = await bcryptjs_1.default.hash(generatedPassword, 10);
+            const user = await User_1.default.create({
+                name,
+                email,
+                password: hashedPassword,
+                phone,
+                company,
+                role,
+                adminLevel: role === 'admin' ? 'sub' : null,
+                isTemporaryPassword: false,
+                isApproved: true,
+                setupCompleted: true,
+            });
+            const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
+            const accountLabel = role === 'admin' ? 'Admin' : 'Developer';
+            const emailSubject = `Your Websmith ${accountLabel} Account Credentials`;
+            const emailText = `
+        Hello ${name},
+
+        Your Websmith ${accountLabel.toLowerCase()} account has been created.
+
+        Email: ${email}
+        Password: ${generatedPassword}
+
+        Login here: ${loginUrl}
+      `;
+            const emailHtml = `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e5ea; border-radius: 12px;">
+          <h2 style="color: #007AFF;">Welcome to Websmith</h2>
+          <p>Hello <strong>${(0, email_service_1.escapeHtml)(name)}</strong>,</p>
+          <p>Your ${(0, email_service_1.escapeHtml)(accountLabel.toLowerCase())} account is ready.</p>
+          <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0 0 8px 0;"><strong>Email:</strong> ${(0, email_service_1.escapeHtml)(email)}</p>
+            <p style="margin: 0;"><strong>Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 4px; border-radius: 4px;">${generatedPassword}</code></p>
+          </div>
+          <a href="${loginUrl}" style="display: inline-block; background-color: #007AFF; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Log In</a>
+        </div>
+      `;
+            try {
+                await (0, email_service_1.sendEmail)(email, emailSubject, emailText, emailHtml);
+            }
+            catch (emailError) {
+                await User_1.default.findByIdAndDelete(user._id);
+                throw emailError;
+            }
+            res.status(201).json({
+                success: true,
+                data: {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone || '',
+                    company: user.company || '',
+                    role: user.role,
+                    adminLevel: user.role === 'admin' ? (user.adminLevel || 'super') : null,
+                },
+            });
+        }
+        catch (error) {
+            console.error('Create managed user error:', error);
+            const message = error?.message || 'Failed to create user';
+            res.status(500).json({ success: false, message });
+        }
+    }
+    async deleteManagedUser(req, res) {
+        try {
+            const requester = req.user;
+            const requesterId = String(req.userId || '');
+            const { id } = req.params;
+            if (!isAdmin(requester)) {
+                res.status(403).json({ success: false, message: 'Forbidden' });
+                return;
+            }
+            const targetUser = await User_1.default.findById(id);
+            if (!targetUser) {
+                res.status(404).json({ success: false, message: 'User not found' });
+                return;
+            }
+            if (!['admin', 'developer'].includes(targetUser.role)) {
+                res.status(400).json({ success: false, message: 'Only admin and developer accounts can be deleted here' });
+                return;
+            }
+            if (String(targetUser._id) === requesterId) {
+                res.status(400).json({ success: false, message: 'You cannot delete your own account' });
+                return;
+            }
+            if (targetUser.role === 'admin' && !isSuperAdmin(requester)) {
+                res.status(403).json({ success: false, message: 'Only super admin can remove an admin' });
+                return;
+            }
+            if (targetUser.role === 'admin' && (targetUser.adminLevel || 'super') === 'super') {
+                res.status(403).json({ success: false, message: 'Super admin account cannot be deleted here' });
+                return;
+            }
+            await User_1.default.findByIdAndDelete(id);
+            res.status(200).json({ success: true, message: 'User deleted successfully' });
+        }
+        catch (error) {
+            console.error('Delete managed user error:', error);
+            res.status(500).json({ success: false, message: 'Failed to delete user' });
         }
     }
 }

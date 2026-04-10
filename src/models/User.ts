@@ -9,7 +9,9 @@ export interface IUser extends Document {
   password: string;
   phone?: string;
   company?: string;
-  role: "admin" | "client" | "developer";
+role: "admin" | "client" | "developer";
+role: 'admin' | 'client' | 'developer';
+  adminLevel?: 'super' | 'sub' | null;
   avatar?: string;
   preferences: {
     theme: "light" | "dark";
@@ -69,6 +71,11 @@ const UserSchema = new Schema<IUser>(
       type: String,
       enum: ["admin", "client", "developer"],
       default: "client",
+    },
+    adminLevel: {
+      type: String,
+      enum: ['super', 'sub', null],
+      default: null,
     },
     avatar: {
       type: String,

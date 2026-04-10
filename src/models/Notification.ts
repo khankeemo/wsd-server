@@ -4,7 +4,7 @@ export interface INotification extends Document {
   recipientId: mongoose.Types.ObjectId;
   senderId?: mongoose.Types.ObjectId;
   type:
-    | "client_setup_complete"
+| "client_setup_complete"
     | "client_approval_required"
     | "task_completed"
     | "task_assigned"
@@ -12,6 +12,12 @@ export interface INotification extends Document {
     | "query_updated"
     | "project_status_changed"
     | "other";
+| 'client_setup_complete'
+    | 'client_approval_required'
+    | 'client_query'
+    | 'project_assignment_assigned'
+    | 'project_assignment_unassigned'
+    | 'other';
   message: string;
   isRead: boolean;
   metadata?: Record<string, unknown>;
@@ -26,7 +32,7 @@ const NotificationSchema = new Schema<INotification>(
     type: { 
       type: String, 
       enum: [
-        "client_setup_complete",
+"client_setup_complete",
         "client_approval_required",
         "task_completed",
         "task_assigned",
@@ -34,6 +40,12 @@ const NotificationSchema = new Schema<INotification>(
         "query_updated",
         "project_status_changed",
         "other",
+'client_setup_complete',
+        'client_approval_required',
+        'client_query',
+        'project_assignment_assigned',
+        'project_assignment_unassigned',
+        'other',
       ], 
       default: 'other' 
     },
