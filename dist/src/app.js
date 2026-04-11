@@ -25,9 +25,21 @@ const configuredOrigins = process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(",").map((origin) => origin.trim()).filter(Boolean)
     : [];
 const allowedOrigins = Array.from(new Set([...defaultAllowedOrigins, ...configuredOrigins]));
+const isAllowedOrigin = (origin) => {
+    if (allowedOrigins.includes(origin)) {
+        return true;
+    }
+    try {
+        const { hostname } = new URL(origin);
+        return hostname.endsWith(".vercel.app");
+    }
+    catch {
+        return false;
+    }
+};
 const corsOptions = {
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || isAllowedOrigin(origin)) {
             callback(null, true);
             return;
         }
