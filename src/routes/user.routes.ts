@@ -15,6 +15,7 @@ router.use(authMiddleware);
 
 // GET /api/users/me - Get current user profile
 router.get('/me', userController.getCurrentUser.bind(userController));
+router.get('/profile', userController.getCurrentUser.bind(userController));
 
 // Notifications
 router.get('/notifications', userController.getMyNotifications.bind(userController));

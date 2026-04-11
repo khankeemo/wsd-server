@@ -5,6 +5,7 @@
 
 import { Request, Response } from "express";
 import { Project } from "../models/Project";
+import { Task } from "../models/Task";
 import User from "../models/User";
 import Notification from "../models/Notification";
 
@@ -54,6 +55,24 @@ const mapProjectResponse = (project: any) => ({
   clientUserEmail: project.clientId?.email || project.clientEmail,
   published: Boolean(project.published),
 });
+
+const sanitizeSharedFiles = (value: unknown, userId: string) => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item: any) => ({
+      name: String(item?.name || "").trim(),
+      url: String(item?.url || "").trim(),
+      category: ["deliverable", "asset", "document", "other"].includes(String(item?.category || ""))
+        ? String(item.category)
+        : "document",
+      uploadedBy: item?.uploadedBy || userId,
+      uploadedAt: item?.uploadedAt ? new Date(String(item.uploadedAt)) : new Date(),
+    }))
+    .filter((item) => item.name && item.url);
+};
 
 const createClientAssignmentNotification = async (project: any) => {
   if (!project?.clientId?._id) {
@@ -122,8 +141,11 @@ export const getProjectById = async (req: Request, res: Response) => {
 
     await project.populate("clientId", "name email");
     await project.populate("assignedDevId", "name email");
+    const relatedTasks = await Task.find({ projectId: project._id })
+      .populate("developerId", "name email customId")
+      .sort({ createdAt: -1 });
 
-    res.json({ success: true, data: mapProjectResponse(project) });
+    res.json({ success: true, data: { ...mapProjectResponse(project), tasks: relatedTasks } });
   } catch (error) {
     console.error("Get project error:", error);
     res.status(500).json({ message: "Failed to fetch project" });
@@ -179,6 +201,7 @@ export const createProject = async (req: Request, res: Response) => {
       feedback: [],
       customization: { buttonColor: "#007AFF", theme: "light" },
       activityLog: [{ action: "Project created", user: userId, timestamp: new Date() }],
+      sharedFiles: sanitizeSharedFiles(req.body.sharedFiles, userId),
       published: Boolean(published),
       statusUpdates: [{
         status: status || "pending",
@@ -253,6 +276,9 @@ export const updateProject = async (req: Request, res: Response) => {
     }
     if (budget !== undefined) project.budget = budget;
     if (published !== undefined) project.published = Boolean(published);
+    if (req.body.sharedFiles !== undefined) {
+      project.sharedFiles = sanitizeSharedFiles(req.body.sharedFiles, userId) as any;
+    }
 
     project.activityLog.push({
       action: "Project updated",

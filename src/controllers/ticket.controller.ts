@@ -5,6 +5,11 @@ import User from "../models/User";
 import Notification from "../models/Notification";
 import { sendEmail, isEmailConfigured, escapeHtml } from "../services/email.service";
 
+const isQueryNotificationEnabled = async (recipientId: any) => {
+  const recipient = await User.findById(recipientId).select("preferences.notifications");
+  return recipient?.preferences?.notifications?.queryResponses !== false;
+};
+
 const getTicketScope = (req: Request) => {
   const user = (req as any).user;
   const userId = (req as any).userId;
@@ -32,7 +37,7 @@ export const createTicket = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const userId = (req as any).userId;
-    const { projectId, subject, description, priority } = req.body;
+    const { projectId, subject, description, priority, attachments = [] } = req.body;
 
     if (!userId || !user) {
       return res.status(401).json({ success: false, message: "Unauthorized" });
@@ -40,6 +45,10 @@ export const createTicket = async (req: Request, res: Response) => {
 
     if (user.role !== "client") {
       return res.status(403).json({ success: false, message: "Only clients can create tickets" });
+    }
+
+    if (!String(subject || "").trim() || !String(description || "").trim()) {
+      return res.status(400).json({ success: false, message: "Subject and description are required" });
     }
 
     let project = null;
@@ -58,6 +67,14 @@ export const createTicket = async (req: Request, res: Response) => {
       subject,
       description,
       priority: priority || "medium",
+      attachments: Array.isArray(attachments)
+        ? attachments
+            .map((item: any) => ({
+              name: String(item?.name || "").trim(),
+              url: String(item?.url || "").trim(),
+            }))
+            .filter((item) => item.name && item.url)
+        : [],
       status: "open",
       history: [
         {
@@ -149,6 +166,7 @@ export const getTickets = async (req: Request, res: Response) => {
 
     const tickets = await Ticket.find(scope)
       .populate("clientId", "name email")
+      .populate("adminId", "name email")
       .populate("developerId", "name email")
       .populate("projectId", "name status")
       .sort({ createdAt: -1 });
@@ -191,6 +209,10 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, message: "Clients can only reopen their own queries" });
     }
 
+    if (!["open", "in_progress", "resolved"].includes(status)) {
+      return res.status(400).json({ success: false, message: "Invalid ticket status" });
+    }
+
     ticket.status = status;
     if (resolution !== undefined) {
       ticket.resolution = resolution;
@@ -204,13 +226,15 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
     } as any);
     await ticket.save();
 
-    await Notification.create({
-      recipientId: ticket.clientId,
-      senderId: userId,
-      type: "query_updated",
-      message: `${ticket.subject} is now ${status.replace("_", " ")}`,
-      metadata: { ticketId: ticket._id, status, resolution: resolution || "" },
-    });
+    if (await isQueryNotificationEnabled(ticket.clientId)) {
+      await Notification.create({
+        recipientId: ticket.clientId,
+        senderId: userId,
+        type: "query_updated",
+        message: `${ticket.subject} is now ${status.replace("_", " ")}`,
+        metadata: { ticketId: ticket._id, status, resolution: resolution || "" },
+      });
+    }
 
     if (status === "resolved" && resolution && isEmailConfigured()) {
       const client = await User.findById(ticket.clientId);
@@ -228,6 +252,40 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Update ticket status error:", error);
     res.status(500).json({ success: false, message: "Failed to update ticket status" });
+  }
+};
+
+export const deleteTicket = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const userId = (req as any).userId;
+    const { id } = req.params;
+
+    if (!user || !userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const scope =
+      user.role === "admin"
+        ? { _id: id }
+        : user.role === "client"
+          ? { _id: id, clientId: userId }
+          : { _id: id, developerId: userId };
+
+    const ticket = await Ticket.findOne(scope);
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: "Ticket not found" });
+    }
+
+    if (user.role === "client" && ticket.status === "in_progress") {
+      return res.status(400).json({ success: false, message: "In-progress queries cannot be deleted" });
+    }
+
+    await Ticket.deleteOne({ _id: ticket._id });
+    res.json({ success: true, message: "Query deleted successfully" });
+  } catch (error) {
+    console.error("Delete ticket error:", error);
+    res.status(500).json({ success: false, message: "Failed to delete ticket" });
   }
 };
 

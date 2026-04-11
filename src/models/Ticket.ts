@@ -10,6 +10,10 @@ export interface ITicket extends Document {
   priority: "low" | "medium" | "high";
   status: "open" | "in_progress" | "resolved";
   resolution?: string;
+  attachments: Array<{
+    name: string;
+    url: string;
+  }>;
   history: Array<{
     action: string;
     actorId?: mongoose.Types.ObjectId | null;
@@ -40,6 +44,18 @@ const ticketSchema = new Schema<ITicket>(
       default: "open",
     },
     resolution: { type: String, default: "" },
+    attachments: {
+      type: [
+        new Schema(
+          {
+            name: { type: String, required: true, trim: true },
+            url: { type: String, required: true, trim: true },
+          },
+          { _id: true }
+        ),
+      ],
+      default: [],
+    },
     history: {
       type: [
         new Schema(

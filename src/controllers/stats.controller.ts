@@ -10,6 +10,7 @@ import { Task } from "../models/Task";
 import Payment from "../models/Payment";
 import Ticket from "../models/Ticket";
 import User from "../models/User";
+import Notification from "../models/Notification";
 
 export const getDashboardStats = async (req: Request, res: Response) => {
   try {
@@ -73,6 +74,45 @@ export const getDashboardStats = async (req: Request, res: Response) => {
       ]
         .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
         .slice(0, 8);
+
+      const now = new Date();
+      const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const [upcomingDeadlines, overdueProjects, unreadNotifications, openQueries] = await Promise.all([
+        Project.find({
+          clientId: userId,
+          expectedCompletionDate: { $gte: now, $lte: sevenDaysFromNow },
+          status: { $ne: "completed" },
+        })
+          .select("name expectedCompletionDate status progress")
+          .sort({ expectedCompletionDate: 1 }),
+        Project.find({
+          clientId: userId,
+          expectedCompletionDate: { $lt: now },
+          status: { $ne: "completed" },
+        })
+          .select("name expectedCompletionDate status progress")
+          .sort({ expectedCompletionDate: 1 }),
+        Notification.countDocuments({ recipientId: userId, isRead: false }),
+        Ticket.countDocuments({ clientId: userId, status: { $ne: "resolved" } }),
+      ]);
+
+      return res.json({
+        success: true,
+        data: {
+          projects: totalProjects,
+          clients: totalClients,
+          tasks: pendingTasks,
+          revenue: totalRevenue,
+          developers: totalDevelopers,
+          completedTasks,
+          activeProjects,
+          recentActivity,
+          upcomingDeadlines,
+          overdueProjects,
+          unreadNotifications,
+          openQueries,
+        }
+      });
     } else if (user.role === "developer") {
       totalProjects = await Project.countDocuments({ assignedDevId: userId });
       totalClients = await Project.distinct("clientId", { assignedDevId: userId }).then((ids) => ids.filter(Boolean).length);

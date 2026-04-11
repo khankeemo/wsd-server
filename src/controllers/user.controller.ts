@@ -31,7 +31,10 @@ const buildUserResponse = (user: any) => ({
   joinedAt: user.joinedAt || null,
   isTemporaryPassword: user.isTemporaryPassword,
   setupCompleted: user.setupCompleted,
-  preferences: user.preferences || { theme: "light", notifications: { email: true, push: true } },
+  preferences: user.preferences || {
+    theme: "light",
+    notifications: { email: true, push: true, projectUpdates: true, queryResponses: true },
+  },
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
 });
@@ -94,14 +97,44 @@ export class UserController {
         return;
       }
 
+      const existingUser = await User.findById(userId);
+
+      if (!existingUser) {
+        res.status(404).json({ success: false, message: "User not found" });
+        return;
+      }
+
+      if (email !== undefined && String(email).trim().toLowerCase() !== existingUser.email) {
+        res.status(400).json({ success: false, message: "Email address cannot be changed here" });
+        return;
+      }
+
+      const mergedPreferences =
+        preferences !== undefined
+          ? {
+              theme: preferences.theme ?? existingUser.preferences?.theme ?? "light",
+              notifications: {
+                email: preferences.notifications?.email ?? existingUser.preferences?.notifications?.email ?? true,
+                push: preferences.notifications?.push ?? existingUser.preferences?.notifications?.push ?? true,
+                projectUpdates:
+                  preferences.notifications?.projectUpdates ??
+                  existingUser.preferences?.notifications?.projectUpdates ??
+                  true,
+                queryResponses:
+                  preferences.notifications?.queryResponses ??
+                  existingUser.preferences?.notifications?.queryResponses ??
+                  true,
+              },
+            }
+          : undefined;
+
       const updatedUser = await User.findByIdAndUpdate(
         userId,
         {
           ...(name !== undefined ? { name } : {}),
-          ...(email !== undefined ? { email } : {}),
           ...(phone !== undefined ? { phone } : {}),
           ...(company !== undefined ? { company } : {}),
-          ...(preferences !== undefined ? { preferences } : {}),
+          ...(mergedPreferences !== undefined ? { preferences: mergedPreferences } : {}),
           ...(avatar !== undefined ? { avatar } : {}),
           ...(headline !== undefined ? { headline } : {}),
           ...(bio !== undefined ? { bio } : {}),
@@ -110,11 +143,6 @@ export class UserController {
         },
         { new: true, runValidators: true }
       ).select("-password");
-
-      if (!updatedUser) {
-        res.status(404).json({ success: false, message: "User not found" });
-        return;
-      }
 
       res.status(200).json({
         success: true,

@@ -37,6 +37,14 @@ export interface IActivityLog {
   timestamp: Date;
 }
 
+export interface ISharedFile {
+  name: string;
+  url: string;
+  category: "deliverable" | "asset" | "document" | "other";
+  uploadedBy: mongoose.Types.ObjectId;
+  uploadedAt: Date;
+}
+
 export interface IStatusUpdate {
   status: 'pending' | 'in-progress' | 'completed' | 'on-hold';
   progress: number;
@@ -71,6 +79,7 @@ export interface IProject extends Document {
   customization: ICustomization;
   activityLog: IActivityLog[];
   statusUpdates: IStatusUpdate[];
+  sharedFiles: ISharedFile[];
   published?: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -110,6 +119,18 @@ const activityLogSchema = new Schema<IActivityLog>({
   action: { type: String, required: true },
   user: { type: String, required: true },
   timestamp: { type: Date, default: Date.now }
+});
+
+const sharedFileSchema = new Schema<ISharedFile>({
+  name: { type: String, required: true, trim: true },
+  url: { type: String, required: true, trim: true },
+  category: {
+    type: String,
+    enum: ["deliverable", "asset", "document", "other"],
+    default: "document"
+  },
+  uploadedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+  uploadedAt: { type: Date, default: Date.now }
 });
 
 const statusUpdateSchema = new Schema<IStatusUpdate>({
@@ -171,6 +192,7 @@ const projectSchema = new Schema<IProject>(
     customization: { type: customizationSchema, default: () => ({}) },
     activityLog: [activityLogSchema],
     statusUpdates: [statusUpdateSchema],
+    sharedFiles: { type: [sharedFileSchema], default: [] },
     published: { type: Boolean, default: false },
   },
   {

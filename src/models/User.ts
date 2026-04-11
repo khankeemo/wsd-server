@@ -12,13 +12,15 @@ export interface IUser extends Document {
   role: "admin" | "client" | "developer";
   adminLevel?: 'super' | 'sub' | null;
   avatar?: string;
-  preferences: {
-    theme: "light" | "dark";
-    notifications: {
-      email: boolean;
-      push: boolean;
+    preferences: {
+      theme: "light" | "dark";
+      notifications: {
+        email: boolean;
+        push: boolean;
+        projectUpdates?: boolean;
+        queryResponses?: boolean;
+      };
     };
-  };
   provider?: string | null;
   providerId?: string;
   isOAuthUser: boolean;
@@ -89,6 +91,8 @@ const UserSchema = new Schema<IUser>(
       notifications: {
         email: { type: Boolean, default: true },
         push: { type: Boolean, default: true },
+        projectUpdates: { type: Boolean, default: true },
+        queryResponses: { type: Boolean, default: true },
       },
     },
     provider: {
