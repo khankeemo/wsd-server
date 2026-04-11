@@ -21,7 +21,8 @@ import {
   addFeedback,
   getFeedback,
   updateCustomization,
-  bulkUpdateProjectStatus
+  bulkUpdateProjectStatus,
+  togglePublish
 } from "../controllers/project.controller";
 
 const router = express.Router();
@@ -95,5 +96,8 @@ router.put("/:id/customization", updateCustomization);
 
 // POST /api/projects/bulk-status - Bulk update project statuses (for Kanban)
 router.post("/bulk-status", bulkUpdateProjectStatus);
+
+// PATCH /api/projects/:id/publish - Toggle project publish status
+router.patch("/:id/publish", togglePublish);
 
 export default router;

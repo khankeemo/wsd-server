@@ -116,3 +116,93 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     });
   }
 };
+
+// Developer-specific dashboard stats with detailed breakdown
+export const getDeveloperStats = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).userId;
+    const user = (req as any).user;
+
+    if (!userId || !user || user.role !== "developer") {
+      return res.status(401).json({ 
+        success: false, 
+        message: "Unauthorized - Developer access required" 
+      });
+    }
+
+    // Fetch projects and tasks in parallel
+    const [projects, tasks] = await Promise.all([
+      Project.find({ assignedDevId: userId }).select("name status progress endDate"),
+      Task.find({ developerId: userId }).select("title status priority dueDate projectId createdAt").populate("projectId", "name status")
+    ]);
+
+    // Calculate task statistics
+    const tasksByStatus = {
+      pending: tasks.filter(t => t.status === "pending").length,
+      inProgress: tasks.filter(t => t.status === "in-progress").length,
+      review: tasks.filter(t => t.status === "review").length,
+      completed: tasks.filter(t => t.status === "completed").length,
+    };
+
+    const tasksByPriority = {
+      high: tasks.filter(t => t.priority === "high").length,
+      medium: tasks.filter(t => t.priority === "medium").length,
+      low: tasks.filter(t => t.priority === "low").length,
+    };
+
+    // Calculate deadlines
+    const now = new Date();
+    const upcomingDeadlines = tasks.filter(t => {
+      if (!t.dueDate || t.status === "completed") return false;
+      const dueDate = new Date(t.dueDate);
+      const daysLeft = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      return daysLeft <= 7 && daysLeft >= 0;
+    }).sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime());
+
+    const overdueTasks = tasks.filter(t => {
+      if (!t.dueDate || t.status === "completed") return false;
+      return new Date(t.dueDate) < now;
+    });
+
+    // Generate recent activity
+    const recentActivity = [
+      ...projects.map(project => ({
+        id: String(project._id),
+        type: "project" as const,
+        title: `Project ${project.name} is ${project.status}`,
+        timestamp: project.updatedAt || project.createdAt
+      })),
+      ...tasks.map(task => ({
+        id: String(task._id),
+        type: "task" as const,
+        title: `Task "${task.title}" is ${task.status}`,
+        timestamp: task.createdAt
+      }))
+    ]
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .slice(0, 10);
+
+    const stats = {
+      totalProjects: projects.length,
+      activeProjects: projects.filter(p => p.status === "in-progress").length,
+      completedProjects: projects.filter(p => p.status === "completed").length,
+      totalTasks: tasks.length,
+      tasksByStatus,
+      tasksByPriority,
+      upcomingDeadlines: upcomingDeadlines.length,
+      overdueTasks: overdueTasks.length,
+      upcomingDeadlineTasks: upcomingDeadlines,
+      overdueTaskList: overdueTasks,
+      recentActivity
+    };
+
+    res.json({ success: true, data: stats });
+  } catch (error) {
+    console.error("Get developer stats error:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to fetch developer stats",
+      error: (error as Error).message 
+    });
+  }
+};

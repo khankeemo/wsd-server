@@ -16,13 +16,13 @@ router.use(authMiddleware);
 // GET /api/users/me - Get current user profile
 router.get('/me', userController.getCurrentUser.bind(userController));
 
+// Notifications
 router.get('/notifications', userController.getMyNotifications.bind(userController));
 router.patch('/notifications/:id/read', userController.markNotificationRead.bind(userController));
 router.post('/notifications/mark-all-read', userController.markAllNotificationsRead.bind(userController));
 
+// Admin routes
 router.get('/role/:role', requireRoles('admin'), userController.getUsersByRole.bind(userController));
-router.get('/notifications', userController.getMyNotifications.bind(userController));
-router.patch('/notifications/:id/read', userController.markMyNotificationRead.bind(userController));
 router.post('/managed', requireRoles('admin'), userController.createManagedUser.bind(userController));
 router.delete('/managed/:id', requireRoles('admin'), userController.deleteManagedUser.bind(userController));
 

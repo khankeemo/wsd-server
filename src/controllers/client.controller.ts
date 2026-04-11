@@ -332,3 +332,29 @@ export const deleteClient = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Failed to delete client" });
   }
 };
+
+// Toggle client publish status
+export const togglePublish = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { published } = req.body;
+    const adminId = getUserId(req);
+
+    if (!adminId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const client = await Client.findOne({ _id: id, ...buildAdminOwnershipQuery(adminId) });
+    if (!client) {
+      return res.status(404).json({ success: false, message: "Client not found" });
+    }
+
+    client.published = published;
+    await client.save();
+
+    res.json({ success: true, data: client });
+  } catch (error) {
+    console.error("Toggle publish error:", error);
+    res.status(500).json({ success: false, message: "Failed to update publish status" });
+  }
+};

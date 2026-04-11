@@ -125,8 +125,8 @@ export const createTask = async (req: Request, res: Response) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    if (role !== "admin") {
-      return res.status(403).json({ message: "Only admins can create tasks" });
+    if (role !== "admin" && role !== "developer") {
+      return res.status(403).json({ message: "Only admins and developers can create tasks" });
     }
 
     // Validate required fields
@@ -134,19 +134,25 @@ export const createTask = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Missing required field: title" });
     }
 
+    // Resolve project, client, and developer IDs
     let resolvedClientId = clientId || null;
     let resolvedDeveloperId = developerId || null;
     let resolvedAssignee = assignee || "";
     let resolvedProjectId = projectId || null;
+    let taskOwnerId = userId; // Default to current user
 
     if (projectId) {
-      const project = await Project.findOne({ _id: projectId, userId });
+      const project = await Project.findById(projectId);
       if (!project) {
         return res.status(404).json({ message: "Project not found" });
       }
       resolvedProjectId = String(project._id);
       resolvedClientId = resolvedClientId || String(project.clientId || "");
       resolvedDeveloperId = resolvedDeveloperId || String(project.assignedDevId || "");
+      // If developer is creating task, set owner to project owner (admin)
+      if (role === "developer") {
+        taskOwnerId = String(project.userId);
+      }
     }
 
     if (resolvedDeveloperId) {
@@ -157,8 +163,17 @@ export const createTask = async (req: Request, res: Response) => {
       resolvedAssignee = developer.name;
     }
 
+    // If developer is creating task without project, auto-assign to themselves
+    if (role === "developer" && !resolvedDeveloperId) {
+      resolvedDeveloperId = userId;
+      const developer = await User.findById(userId);
+      if (developer) {
+        resolvedAssignee = developer.name;
+      }
+    }
+
     const task = await Task.create({
-      userId,
+      userId: taskOwnerId,
       title,
       description: description || "",
       projectId: resolvedProjectId || null,
@@ -171,7 +186,19 @@ export const createTask = async (req: Request, res: Response) => {
       subtasks,
     });
 
-    if (resolvedDeveloperId) {
+    // Send notification to admin when developer creates task
+    if (role === "developer" && task.userId) {
+      await Notification.create({
+        recipientId: task.userId,
+        senderId: userId,
+        type: "task_created_by_developer",
+        message: `New task created by developer: ${title}`,
+        metadata: { taskId: task._id, projectId: resolvedProjectId },
+      });
+    }
+
+    // Send notification to developer when admin assigns task
+    if (role === "admin" && resolvedDeveloperId) {
       await Notification.create({
         recipientId: resolvedDeveloperId,
         senderId: userId,

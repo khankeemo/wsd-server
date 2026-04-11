@@ -10,7 +10,8 @@ import {
   getClientById,
   createClient,
   updateClient,
-  deleteClient
+  deleteClient,
+  togglePublish
 } from "../controllers/client.controller";
 
 const router = express.Router();
@@ -35,5 +36,8 @@ router.put("/:id", updateClient);
 
 // DELETE /api/clients/:id - Delete client
 router.delete("/:id", deleteClient);
+
+// PATCH /api/clients/:id/publish - Toggle client publish status
+router.patch("/:id/publish", togglePublish);
 
 export default router;

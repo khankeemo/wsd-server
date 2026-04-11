@@ -754,3 +754,29 @@ export const bulkUpdateProjectStatus = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Failed to bulk update projects" });
   }
 };
+
+// Toggle project publish status
+export const togglePublish = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { published } = req.body;
+    
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const project = await Project.findOne({ _id: id, userId });
+    if (!project) {
+      return res.status(404).json({ success: false, message: "Project not found" });
+    }
+
+    project.published = published;
+    await project.save();
+
+    res.json({ success: true, data: mapProjectResponse(project) });
+  } catch (error) {
+    console.error("Toggle publish error:", error);
+    res.status(500).json({ success: false, message: "Failed to update publish status" });
+  }
+};

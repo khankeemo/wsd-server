@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import User from "../models/User";
 import Notification from "../models/Notification";
-import { sendEmail, isEmailConfigured } from "../services/email.service";
+import { sendEmail, isEmailConfigured, escapeHtml } from "../services/email.service";
 
 const buildUserResponse = (user: any) => ({
   id: user._id,
@@ -43,12 +43,6 @@ const developerCustomId = async () => {
     if (!exists) return candidate;
   }
 };
-import { Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
-import crypto from 'crypto';
-import User from '../models/User';
-import Notification from '../models/Notification';
-import { escapeHtml, isEmailConfigured, sendEmail } from '../services/email.service';
 
 const isAdmin = (user: any) => user?.role === 'admin';
 const isSuperAdmin = (user: any) => isAdmin(user) && (user.adminLevel || 'super') === 'super';
@@ -74,33 +68,15 @@ export class UserController {
         res.status(404).json({ success: false, message: "User not found" });
         return;
       }
-res.status(200).json({ success: true, user: buildUserResponse(user) });
-res.status(200).json({
-        success: true,
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone || '',
-          company: user.company || '',
-          role: user.role || 'client',
-          adminLevel: user.role === 'admin' ? (user.adminLevel || 'super') : null,
-          avatar: user.avatar || '',
-          preferences: user.preferences || { theme: 'light', notifications: { email: true, push: true } },
-          createdAt: user.createdAt,
-        }
-      });
+
+      res.status(200).json({ success: true, user: buildUserResponse(user) });
     } catch (error) {
       console.error("Get current user error:", error);
       res.status(500).json({ success: false, message: "Server error - Could not fetch user profile" });
     }
   }
 
-async updateUserProfile(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).userId;
-      const { name, email, phone, company, preferences, avatar, headline, bio, skills } = req.body;
-/**
+  /**
    * Update user profile
    * PUT /api/users/profile
    * Requires: Authentication token
@@ -109,19 +85,13 @@ async updateUserProfile(req: Request, res: Response): Promise<void> {
   async updateUserProfile(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as any).userId;
-      const { name, email, phone, company, avatar, preferences } = req.body;
+      const { name, email, phone, company, preferences, avatar, headline, bio, skills } = req.body;
+
       if (!userId) {
         res.status(401).json({ success: false, message: "Unauthorized" });
         return;
       }
 
-const updateData: any = {};
-      if (name) updateData.name = name;
-      if (email) updateData.email = email;
-      if (phone) updateData.phone = phone;
-      if (company) updateData.company = company;
-      if (avatar) updateData.avatar = avatar;
-      if (preferences) updateData.preferences = preferences;
       const updatedUser = await User.findByIdAndUpdate(
         userId,
         {
@@ -246,7 +216,7 @@ const updateData: any = {};
         return;
       }
 
-const tempPassword = crypto.randomBytes(4).toString("hex");
+      const tempPassword = crypto.randomBytes(4).toString("hex");
       const developer = await User.create({
         name,
         email: String(email).toLowerCase(),
@@ -265,12 +235,6 @@ const tempPassword = crypto.randomBytes(4).toString("hex");
         joinedAt: joinedAt ? new Date(joinedAt) : null,
         published: Boolean(published),
       });
-if (role === 'admin' && !isSuperAdmin(requester)) {
-        res.status(403).json({ success: false, message: 'Only super admin can view admins' });
-        return;
-      }
-
-      const users = await User.find({ role }).select('_id name email role company adminLevel');
 
       if (isEmailConfigured()) {
         await sendEmail(
@@ -355,51 +319,6 @@ if (role === 'admin' && !isSuperAdmin(requester)) {
   async getMyNotifications(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as any).userId;
-      const notifications = await Notification.find({ recipientId: userId }).sort({ createdAt: -1 }).limit(50);
-      res.status(200).json({ success: true, data: notifications });
-    } catch (error) {
-      console.error("Get notifications error:", error);
-      res.status(500).json({ success: false, message: "Failed to fetch notifications" });
-    }
-  }
-
-  async markAllNotificationsRead(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).userId;
-      await Notification.updateMany(
-        { recipientId: userId, isRead: false },
-        { isRead: true }
-      );
-      res.status(200).json({ success: true, message: "All notifications marked as read" });
-    } catch (error) {
-      console.error("Mark all notifications read error:", error);
-      res.status(500).json({ success: false, message: "Failed to update notifications" });
-    }
-  }
-
-  async markNotificationRead(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).userId;
-      const { id } = req.params;
-      const notification = await Notification.findOneAndUpdate(
-        { _id: id, recipientId: userId },
-        { isRead: true },
-        { new: true }
-      );
-      if (!notification) {
-        res.status(404).json({ success: false, message: "Notification not found" });
-        return;
-      }
-      res.status(200).json({ success: true, data: notification });
-    } catch (error) {
-      console.error("Mark notification read error:", error);
-      res.status(500).json({ success: false, message: "Failed to update notification" });
-    }
-  }
-
-  async getMyNotifications(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).userId;
 
       if (!userId) {
         res.status(401).json({ success: false, message: 'Unauthorized' });
@@ -417,7 +336,27 @@ if (role === 'admin' && !isSuperAdmin(requester)) {
     }
   }
 
-  async markMyNotificationRead(req: Request, res: Response): Promise<void> {
+  async markAllNotificationsRead(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = (req as any).userId;
+
+      if (!userId) {
+        res.status(401).json({ success: false, message: 'Unauthorized' });
+        return;
+      }
+
+      await Notification.updateMany(
+        { recipientId: userId, isRead: false },
+        { isRead: true }
+      );
+      res.status(200).json({ success: true, message: "All notifications marked as read" });
+    } catch (error) {
+      console.error("Mark all notifications read error:", error);
+      res.status(500).json({ success: false, message: "Failed to update notifications" });
+    }
+  }
+
+  async markNotificationRead(req: Request, res: Response): Promise<void> {
     try {
       const userId = (req as any).userId;
       const { id } = req.params;
@@ -427,11 +366,19 @@ if (role === 'admin' && !isSuperAdmin(requester)) {
         return;
       }
 
-      await Notification.findOneAndUpdate({ _id: id, recipientId: userId }, { isRead: true });
-      res.status(200).json({ success: true, message: 'Notification marked as read' });
+      const notification = await Notification.findOneAndUpdate(
+        { _id: id, recipientId: userId },
+        { isRead: true },
+        { new: true }
+      );
+      if (!notification) {
+        res.status(404).json({ success: false, message: "Notification not found" });
+        return;
+      }
+      res.status(200).json({ success: true, data: notification });
     } catch (error) {
-      console.error('Mark my notification read error:', error);
-      res.status(500).json({ success: false, message: 'Failed to update notification' });
+      console.error("Mark notification read error:", error);
+      res.status(500).json({ success: false, message: "Failed to update notification" });
     }
   }
 

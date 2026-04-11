@@ -10,7 +10,10 @@ import {
   createTask,
   updateTask,
   deleteTask,
-  bulkUpdateTaskStatus
+  bulkUpdateTaskStatus,
+  addTaskComment,
+  toggleSubtask,
+  addSubtask
 } from "../controllers/task.controller";
 
 const router = express.Router();
@@ -35,5 +38,14 @@ router.delete("/:id", deleteTask);
 
 // POST /api/tasks/bulk-status - Bulk update task statuses (for Kanban)
 router.post("/bulk-status", bulkUpdateTaskStatus);
+
+// POST /api/tasks/:id/comments - Add comment to task
+router.post("/:id/comments", addTaskComment);
+
+// POST /api/tasks/:id/subtasks - Add subtask
+router.post("/:id/subtasks", addSubtask);
+
+// PATCH /api/tasks/:id/subtasks/:subtaskId - Toggle subtask completion
+router.patch("/:id/subtasks/:subtaskId", toggleSubtask);
 
 export default router;
