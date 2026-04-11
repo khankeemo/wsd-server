@@ -5,6 +5,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getInvoiceStats = exports.markInvoicePaid = exports.deleteInvoice = exports.updateInvoice = exports.createInvoice = exports.getInvoiceById = exports.getInvoices = void 0;
 const Invoice_1 = __importDefault(require("../models/Invoice"));
+const Project_1 = require("../models/Project");
+const User_1 = __importDefault(require("../models/User"));
 const getInvoiceScope = (req) => {
     const user = req.user;
     const userId = req.userId;
@@ -23,6 +25,38 @@ const buildInvoiceNumber = () => `INV-${Date.now()}`;
 const calculateAmount = (items = [], tax = 0, discount = 0) => {
     const subtotal = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
     return subtotal + Number(tax || 0) - Number(discount || 0);
+};
+const hydrateInvoicePayload = async (payload) => {
+    const hydrated = { ...payload };
+    if (payload.projectId) {
+        const project = await Project_1.Project.findById(payload.projectId).populate("clientId", "name email company");
+        if (!project) {
+            throw new Error("Selected project not found");
+        }
+        const populatedClient = project.clientId;
+        hydrated.projectId = project._id;
+        hydrated.clientId = populatedClient?._id || hydrated.clientId || null;
+        hydrated.clientName = hydrated.clientName || project.client || populatedClient?.name || "";
+        hydrated.clientEmail = hydrated.clientEmail || project.clientEmail || populatedClient?.email || "";
+        hydrated.clientAddress = hydrated.clientAddress || project.clientCompany || populatedClient?.company || "";
+    }
+    if (payload.clientId && (!hydrated.clientName || !hydrated.clientEmail)) {
+        const client = await User_1.default.findOne({ _id: payload.clientId, role: "client" });
+        if (!client) {
+            throw new Error("Selected client not found");
+        }
+        hydrated.clientId = client._id;
+        hydrated.clientName = hydrated.clientName || client.name;
+        hydrated.clientEmail = hydrated.clientEmail || client.email;
+        hydrated.clientAddress = hydrated.clientAddress || client.company || "";
+    }
+    if (!hydrated.clientName || !hydrated.clientEmail) {
+        throw new Error("Client name and email are required");
+    }
+    hydrated.billingType = hydrated.billingType || "project_completion";
+    hydrated.milestoneLabel =
+        hydrated.billingType === "milestone" ? String(hydrated.milestoneLabel || "").trim() : "";
+    return hydrated;
 };
 const getInvoices = async (req, res) => {
     try {
@@ -62,7 +96,7 @@ const createInvoice = async (req, res) => {
             return res.status(401).json({ success: false, message: "Unauthorized" });
         if (user.role !== "admin")
             return res.status(403).json({ success: false, message: "Forbidden" });
-        const payload = req.body;
+        const payload = await hydrateInvoicePayload(req.body);
         const invoice = await Invoice_1.default.create({
             ...payload,
             userId,
@@ -73,7 +107,7 @@ const createInvoice = async (req, res) => {
     }
     catch (error) {
         console.error("Create invoice error:", error);
-        res.status(500).json({ success: false, message: "Failed to create invoice" });
+        res.status(500).json({ success: false, message: error instanceof Error ? error.message : "Failed to create invoice" });
     }
 };
 exports.createInvoice = createInvoice;
@@ -88,14 +122,15 @@ const updateInvoice = async (req, res) => {
         const invoice = await Invoice_1.default.findOne({ _id: req.params.id, userId });
         if (!invoice)
             return res.status(404).json({ success: false, message: "Invoice not found" });
-        Object.assign(invoice, req.body);
+        const payload = await hydrateInvoicePayload({ ...invoice.toObject(), ...req.body });
+        Object.assign(invoice, payload);
         invoice.amount = calculateAmount(invoice.items, invoice.tax, invoice.discount);
         await invoice.save();
         res.json({ success: true, data: invoice });
     }
     catch (error) {
         console.error("Update invoice error:", error);
-        res.status(500).json({ success: false, message: "Failed to update invoice" });
+        res.status(500).json({ success: false, message: error instanceof Error ? error.message : "Failed to update invoice" });
     }
 };
 exports.updateInvoice = updateInvoice;

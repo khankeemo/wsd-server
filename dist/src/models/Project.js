@@ -67,6 +67,17 @@ const activityLogSchema = new mongoose_1.Schema({
     user: { type: String, required: true },
     timestamp: { type: Date, default: Date.now }
 });
+const sharedFileSchema = new mongoose_1.Schema({
+    name: { type: String, required: true, trim: true },
+    url: { type: String, required: true, trim: true },
+    category: {
+        type: String,
+        enum: ["deliverable", "asset", "document", "other"],
+        default: "document"
+    },
+    uploadedBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", required: true },
+    uploadedAt: { type: Date, default: Date.now }
+});
 const statusUpdateSchema = new mongoose_1.Schema({
     status: { type: String, enum: ["pending", "in-progress", "completed", "on-hold"], required: true },
     progress: { type: Number, min: 0, max: 100, default: 0 },
@@ -117,6 +128,7 @@ const projectSchema = new mongoose_1.Schema({
     customization: { type: customizationSchema, default: () => ({}) },
     activityLog: [activityLogSchema],
     statusUpdates: [statusUpdateSchema],
+    sharedFiles: { type: [sharedFileSchema], default: [] },
     published: { type: Boolean, default: false },
 }, {
     timestamps: true,

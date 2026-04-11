@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 import Invoice from "../models/Invoice";
+import { Project } from "../models/Project";
+import User from "../models/User";
 
 const getInvoiceScope = (req: Request) => {
   const user = (req as any).user;
@@ -25,6 +27,46 @@ const buildInvoiceNumber = () => `INV-${Date.now()}`;
 const calculateAmount = (items: any[] = [], tax = 0, discount = 0) => {
   const subtotal = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
   return subtotal + Number(tax || 0) - Number(discount || 0);
+};
+
+const hydrateInvoicePayload = async (payload: any) => {
+  const hydrated = { ...payload };
+
+  if (payload.projectId) {
+    const project = await Project.findById(payload.projectId).populate("clientId", "name email company");
+    if (!project) {
+      throw new Error("Selected project not found");
+    }
+    const populatedClient = project.clientId as any;
+
+    hydrated.projectId = project._id;
+    hydrated.clientId = populatedClient?._id || hydrated.clientId || null;
+    hydrated.clientName = hydrated.clientName || project.client || populatedClient?.name || "";
+    hydrated.clientEmail = hydrated.clientEmail || project.clientEmail || populatedClient?.email || "";
+    hydrated.clientAddress = hydrated.clientAddress || project.clientCompany || populatedClient?.company || "";
+  }
+
+  if (payload.clientId && (!hydrated.clientName || !hydrated.clientEmail)) {
+    const client = await User.findOne({ _id: payload.clientId, role: "client" });
+    if (!client) {
+      throw new Error("Selected client not found");
+    }
+
+    hydrated.clientId = client._id;
+    hydrated.clientName = hydrated.clientName || client.name;
+    hydrated.clientEmail = hydrated.clientEmail || client.email;
+    hydrated.clientAddress = hydrated.clientAddress || client.company || "";
+  }
+
+  if (!hydrated.clientName || !hydrated.clientEmail) {
+    throw new Error("Client name and email are required");
+  }
+
+  hydrated.billingType = hydrated.billingType || "project_completion";
+  hydrated.milestoneLabel =
+    hydrated.billingType === "milestone" ? String(hydrated.milestoneLabel || "").trim() : "";
+
+  return hydrated;
 };
 
 export const getInvoices = async (req: Request, res: Response) => {
@@ -62,7 +104,7 @@ export const createInvoice = async (req: Request, res: Response) => {
     if (!user || !userId) return res.status(401).json({ success: false, message: "Unauthorized" });
     if (user.role !== "admin") return res.status(403).json({ success: false, message: "Forbidden" });
 
-    const payload = req.body;
+    const payload = await hydrateInvoicePayload(req.body);
     const invoice = await Invoice.create({
       ...payload,
       userId,
@@ -73,7 +115,7 @@ export const createInvoice = async (req: Request, res: Response) => {
     res.status(201).json({ success: true, data: invoice });
   } catch (error) {
     console.error("Create invoice error:", error);
-    res.status(500).json({ success: false, message: "Failed to create invoice" });
+    res.status(500).json({ success: false, message: error instanceof Error ? error.message : "Failed to create invoice" });
   }
 };
 
@@ -87,14 +129,15 @@ export const updateInvoice = async (req: Request, res: Response) => {
     const invoice = await Invoice.findOne({ _id: req.params.id, userId });
     if (!invoice) return res.status(404).json({ success: false, message: "Invoice not found" });
 
-    Object.assign(invoice, req.body);
+    const payload = await hydrateInvoicePayload({ ...invoice.toObject(), ...req.body });
+    Object.assign(invoice, payload);
     invoice.amount = calculateAmount(invoice.items as any[], invoice.tax, invoice.discount);
     await invoice.save();
 
     res.json({ success: true, data: invoice });
   } catch (error) {
     console.error("Update invoice error:", error);
-    res.status(500).json({ success: false, message: "Failed to update invoice" });
+    res.status(500).json({ success: false, message: error instanceof Error ? error.message : "Failed to update invoice" });
   }
 };
 

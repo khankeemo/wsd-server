@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getPaymentStats = exports.verifyPayment = exports.refundPayment = exports.deletePayment = exports.updatePayment = exports.createPayment = exports.getPaymentById = exports.getPayments = void 0;
 const Payment_1 = __importDefault(require("../models/Payment"));
+const Invoice_1 = __importDefault(require("../models/Invoice"));
 const getPaymentScope = (req) => {
     const user = req.user;
     const userId = req.userId;
@@ -55,12 +56,44 @@ const createPayment = async (req, res) => {
         const userId = req.userId;
         if (!user || !userId)
             return res.status(401).json({ success: false, message: "Unauthorized" });
+        const payload = { ...req.body };
+        if (user.role === "client") {
+            const invoice = await Invoice_1.default.findOne({ _id: payload.invoiceId, clientId: userId });
+            if (!invoice) {
+                return res.status(404).json({ success: false, message: "Invoice not found" });
+            }
+            if (invoice.status === "paid") {
+                return res.status(400).json({ success: false, message: "Invoice is already paid" });
+            }
+            const payment = await Payment_1.default.create({
+                userId: invoice.userId,
+                clientId: userId,
+                invoiceId: invoice._id,
+                invoiceNumber: invoice.invoiceNumber,
+                clientName: invoice.clientName,
+                clientEmail: invoice.clientEmail,
+                amount: invoice.amount,
+                method: payload.method || "card",
+                status: "completed",
+                transactionId: payload.transactionId || `TXN-${Date.now()}`,
+                date: payload.date ? new Date(payload.date) : new Date(),
+                notes: payload.notes || `Client payment for ${invoice.invoiceNumber}`,
+            });
+            invoice.status = "paid";
+            await invoice.save();
+            return res.status(201).json({ success: true, data: payment });
+        }
         if (user.role !== "admin")
             return res.status(403).json({ success: false, message: "Forbidden" });
         const payment = await Payment_1.default.create({
-            ...req.body,
+            ...payload,
             userId,
+            transactionId: payload.transactionId || `TXN-${Date.now()}`,
+            date: payload.date ? new Date(payload.date) : new Date(),
         });
+        if (payment.invoiceId && payment.status === "completed") {
+            await Invoice_1.default.findByIdAndUpdate(payment.invoiceId, { status: "paid" });
+        }
         res.status(201).json({ success: true, data: payment });
     }
     catch (error) {
@@ -120,6 +153,9 @@ const refundPayment = async (req, res) => {
             return res.status(404).json({ success: false, message: "Payment not found" });
         payment.status = "refunded";
         await payment.save();
+        if (payment.invoiceId) {
+            await Invoice_1.default.findByIdAndUpdate(payment.invoiceId, { status: "pending" });
+        }
         res.json({ success: true, data: payment });
     }
     catch (error) {

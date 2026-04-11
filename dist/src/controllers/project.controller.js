@@ -9,6 +9,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.togglePublish = exports.bulkUpdateProjectStatus = exports.getPublishedProjects = exports.getAllProjectsStatus = exports.getProjectStatus = exports.updateCustomization = exports.updateProjectStatus = exports.getFeedback = exports.addFeedback = exports.getMessages = exports.addMessage = exports.updateProgress = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProjectById = exports.getProjects = void 0;
 const Project_1 = require("../models/Project");
+const Task_1 = require("../models/Task");
 const User_1 = __importDefault(require("../models/User"));
 const Notification_1 = __importDefault(require("../models/Notification"));
 // Helper to get userId from request (set by auth middleware)
@@ -47,6 +48,22 @@ const mapProjectResponse = (project) => ({
     clientUserEmail: project.clientId?.email || project.clientEmail,
     published: Boolean(project.published),
 });
+const sanitizeSharedFiles = (value, userId) => {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+    return value
+        .map((item) => ({
+        name: String(item?.name || "").trim(),
+        url: String(item?.url || "").trim(),
+        category: ["deliverable", "asset", "document", "other"].includes(String(item?.category || ""))
+            ? String(item.category)
+            : "document",
+        uploadedBy: item?.uploadedBy || userId,
+        uploadedAt: item?.uploadedAt ? new Date(String(item.uploadedAt)) : new Date(),
+    }))
+        .filter((item) => item.name && item.url);
+};
 const createClientAssignmentNotification = async (project) => {
     if (!project?.clientId?._id) {
         return;
@@ -102,7 +119,10 @@ const getProjectById = async (req, res) => {
         }
         await project.populate("clientId", "name email");
         await project.populate("assignedDevId", "name email");
-        res.json({ success: true, data: mapProjectResponse(project) });
+        const relatedTasks = await Task_1.Task.find({ projectId: project._id })
+            .populate("developerId", "name email customId")
+            .sort({ createdAt: -1 });
+        res.json({ success: true, data: { ...mapProjectResponse(project), tasks: relatedTasks } });
     }
     catch (error) {
         console.error("Get project error:", error);
@@ -154,6 +174,7 @@ const createProject = async (req, res) => {
             feedback: [],
             customization: { buttonColor: "#007AFF", theme: "light" },
             activityLog: [{ action: "Project created", user: userId, timestamp: new Date() }],
+            sharedFiles: sanitizeSharedFiles(req.body.sharedFiles, userId),
             published: Boolean(published),
             statusUpdates: [{
                     status: status || "pending",
@@ -233,6 +254,9 @@ const updateProject = async (req, res) => {
             project.budget = budget;
         if (published !== undefined)
             project.published = Boolean(published);
+        if (req.body.sharedFiles !== undefined) {
+            project.sharedFiles = sanitizeSharedFiles(req.body.sharedFiles, userId);
+        }
         project.activityLog.push({
             action: "Project updated",
             user: userId,

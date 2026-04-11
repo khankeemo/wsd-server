@@ -87,6 +87,8 @@ const UserSchema = new mongoose_1.Schema({
         notifications: {
             email: { type: Boolean, default: true },
             push: { type: Boolean, default: true },
+            projectUpdates: { type: Boolean, default: true },
+            queryResponses: { type: Boolean, default: true },
         },
     },
     provider: {

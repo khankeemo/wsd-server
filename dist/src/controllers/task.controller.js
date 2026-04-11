@@ -57,7 +57,14 @@ const getTasks = async (req, res) => {
             : role === "developer"
                 ? { developerId: userId }
                 : { clientId: userId };
-        const tasks = await Task_1.Task.find(scope)
+        const filters = { ...scope };
+        if (req.query.projectId) {
+            filters.projectId = String(req.query.projectId);
+        }
+        if (req.query.status) {
+            filters.status = String(req.query.status);
+        }
+        const tasks = await Task_1.Task.find(filters)
             .populate("projectId", "name status progress")
             .populate("clientId", "name email")
             .populate("developerId", "name email customId")
@@ -370,7 +377,13 @@ const addTaskComment = async (req, res) => {
         if (!userId || !content) {
             return res.status(400).json({ message: "Content is required" });
         }
-        const task = await Task_1.Task.findById(id);
+        const role = req.user?.role;
+        const scope = role === "admin"
+            ? { _id: id, userId }
+            : role === "developer"
+                ? { _id: id, developerId: userId }
+                : { _id: id, clientId: userId };
+        const task = await Task_1.Task.findOne(scope);
         if (!task) {
             return res.status(404).json({ message: "Task not found" });
         }
@@ -396,7 +409,13 @@ const toggleSubtask = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        const task = await Task_1.Task.findById(id);
+        const role = req.user?.role;
+        const scope = role === "admin"
+            ? { _id: id, userId }
+            : role === "developer"
+                ? { _id: id, developerId: userId }
+                : { _id: id, clientId: userId };
+        const task = await Task_1.Task.findOne(scope);
         if (!task) {
             return res.status(404).json({ message: "Task not found" });
         }
@@ -422,7 +441,14 @@ const addSubtask = async (req, res) => {
         if (!userId || !title) {
             return res.status(400).json({ message: "Title is required" });
         }
-        const task = await Task_1.Task.findById(id);
+        const role = req.user?.role;
+        if (!["admin", "developer"].includes(role)) {
+            return res.status(403).json({ message: "Only admins and developers can add subtasks" });
+        }
+        const scope = role === "admin"
+            ? { _id: id, userId }
+            : { _id: id, developerId: userId };
+        const task = await Task_1.Task.findOne(scope);
         if (!task) {
             return res.status(404).json({ message: "Task not found" });
         }

@@ -44,6 +44,12 @@ const invoiceSchema = new mongoose_1.Schema({
     userId: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", required: true },
     clientId: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", default: null },
     projectId: { type: mongoose_1.Schema.Types.ObjectId, ref: "Project", default: null },
+    billingType: {
+        type: String,
+        enum: ["project_completion", "advance_payment", "milestone"],
+        default: "project_completion",
+    },
+    milestoneLabel: { type: String, default: "" },
     invoiceNumber: { type: String, required: true, unique: true },
     clientName: { type: String, required: true },
     clientEmail: { type: String, required: true },

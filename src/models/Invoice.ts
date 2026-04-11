@@ -11,6 +11,8 @@ export interface IInvoice extends Document {
   userId: mongoose.Types.ObjectId;
   clientId?: mongoose.Types.ObjectId | null;
   projectId?: mongoose.Types.ObjectId | null;
+  billingType: "project_completion" | "advance_payment" | "milestone";
+  milestoneLabel?: string;
   invoiceNumber: string;
   clientName: string;
   clientEmail: string;
@@ -42,6 +44,12 @@ const invoiceSchema = new Schema<IInvoice>(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     clientId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     projectId: { type: Schema.Types.ObjectId, ref: "Project", default: null },
+    billingType: {
+      type: String,
+      enum: ["project_completion", "advance_payment", "milestone"],
+      default: "project_completion",
+    },
+    milestoneLabel: { type: String, default: "" },
     invoiceNumber: { type: String, required: true, unique: true },
     clientName: { type: String, required: true },
     clientEmail: { type: String, required: true },

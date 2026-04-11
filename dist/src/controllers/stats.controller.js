@@ -14,6 +14,7 @@ const Task_1 = require("../models/Task");
 const Payment_1 = __importDefault(require("../models/Payment"));
 const Ticket_1 = __importDefault(require("../models/Ticket"));
 const User_1 = __importDefault(require("../models/User"));
+const Notification_1 = __importDefault(require("../models/Notification"));
 const getDashboardStats = async (req, res) => {
     try {
         const userId = req.userId;
@@ -74,6 +75,43 @@ const getDashboardStats = async (req, res) => {
             ]
                 .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
                 .slice(0, 8);
+            const now = new Date();
+            const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+            const [upcomingDeadlines, overdueProjects, unreadNotifications, openQueries] = await Promise.all([
+                Project_1.Project.find({
+                    clientId: userId,
+                    expectedCompletionDate: { $gte: now, $lte: sevenDaysFromNow },
+                    status: { $ne: "completed" },
+                })
+                    .select("name expectedCompletionDate status progress")
+                    .sort({ expectedCompletionDate: 1 }),
+                Project_1.Project.find({
+                    clientId: userId,
+                    expectedCompletionDate: { $lt: now },
+                    status: { $ne: "completed" },
+                })
+                    .select("name expectedCompletionDate status progress")
+                    .sort({ expectedCompletionDate: 1 }),
+                Notification_1.default.countDocuments({ recipientId: userId, isRead: false }),
+                Ticket_1.default.countDocuments({ clientId: userId, status: { $ne: "resolved" } }),
+            ]);
+            return res.json({
+                success: true,
+                data: {
+                    projects: totalProjects,
+                    clients: totalClients,
+                    tasks: pendingTasks,
+                    revenue: totalRevenue,
+                    developers: totalDevelopers,
+                    completedTasks,
+                    activeProjects,
+                    recentActivity,
+                    upcomingDeadlines,
+                    overdueProjects,
+                    unreadNotifications,
+                    openQueries,
+                }
+            });
         }
         else if (user.role === "developer") {
             totalProjects = await Project_1.Project.countDocuments({ assignedDevId: userId });

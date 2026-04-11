@@ -15,6 +15,7 @@ router.get('/public/developers', user_controller_1.default.getPublishedDeveloper
 router.use(auth_middleware_1.authMiddleware);
 // GET /api/users/me - Get current user profile
 router.get('/me', user_controller_1.default.getCurrentUser.bind(user_controller_1.default));
+router.get('/profile', user_controller_1.default.getCurrentUser.bind(user_controller_1.default));
 // Notifications
 router.get('/notifications', user_controller_1.default.getMyNotifications.bind(user_controller_1.default));
 router.patch('/notifications/:id/read', user_controller_1.default.markNotificationRead.bind(user_controller_1.default));
