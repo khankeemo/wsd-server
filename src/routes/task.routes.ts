@@ -9,6 +9,7 @@ import {
   getTaskById,
   createTask,
   updateTask,
+  updateTaskStatus,
   deleteTask,
   bulkUpdateTaskStatus,
   addTaskComment,
@@ -32,6 +33,9 @@ router.post("/", createTask);
 
 // PUT /api/tasks/:id - Update task
 router.put("/:id", updateTask);
+
+// PUT /api/tasks/:id/status - Update task status
+router.put("/:id/status", updateTaskStatus);
 
 // DELETE /api/tasks/:id - Delete task
 router.delete("/:id", deleteTask);

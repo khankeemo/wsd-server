@@ -254,6 +254,11 @@ export const updateTask = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Invalid clientId" });
     }
 
+    const normalizedDeveloperId = normalizeNullableObjectId(developerId);
+    if ("invalid" in normalizedDeveloperId) {
+      return res.status(400).json({ message: "Invalid developerId" });
+    }
+
     const normalizedDueDate = normalizeNullableDate(dueDate);
     if ("invalid" in normalizedDueDate) {
       return res.status(400).json({ message: "Invalid dueDate" });
@@ -263,8 +268,8 @@ export const updateTask = async (req: Request, res: Response) => {
     if (description !== undefined) task.description = description;
     if (role === "admin" && normalizedProjectId.hasValue) task.projectId = normalizedProjectId.value;
     if (role === "admin" && normalizedClientId.hasValue) task.clientId = normalizedClientId.value;
-    if (role === "admin" && developerId !== undefined) {
-      task.developerId = developerId ? new mongoose.Types.ObjectId(String(developerId)) : null;
+    if (role === "admin" && normalizedDeveloperId.hasValue) {
+      task.developerId = normalizedDeveloperId.value;
     }
     if (status) task.status = status;
     if (role === "admin" && priority) task.priority = priority;
@@ -331,6 +336,10 @@ export const deleteTask = async (req: Request, res: Response) => {
     console.error("Delete task error:", error);
     res.status(500).json({ message: "Failed to delete task" });
   }
+};
+
+export const updateTaskStatus = async (req: Request, res: Response) => {
+  return updateTask(req, res);
 };
 
 // Bulk update task statuses (for Kanban drag-and-drop)

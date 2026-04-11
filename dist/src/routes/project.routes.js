@@ -57,4 +57,8 @@ router.get("/:id/feedback", project_controller_1.getFeedback);
 // ============================================================
 // PUT /api/projects/:id/customization - Update project customization
 router.put("/:id/customization", project_controller_1.updateCustomization);
+// POST /api/projects/bulk-status - Bulk update project statuses (for Kanban)
+router.post("/bulk-status", project_controller_1.bulkUpdateProjectStatus);
+// PATCH /api/projects/:id/publish - Toggle project publish status
+router.patch("/:id/publish", project_controller_1.togglePublish);
 exports.default = router;

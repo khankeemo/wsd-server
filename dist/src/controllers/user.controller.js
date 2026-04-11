@@ -10,7 +10,52 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.UserController = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
+const Project_1 = require("../models/Project");
+const Task_1 = require("../models/Task");
 const User_1 = __importDefault(require("../models/User"));
+const Notification_1 = __importDefault(require("../models/Notification"));
+const email_service_1 = require("../services/email.service");
+const buildUserResponse = (user) => ({
+    id: user._id,
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone || "",
+    company: user.company || "",
+    role: user.role || "client",
+    avatar: user.avatar || "",
+    customId: user.customId || "",
+    published: user.published || false,
+    headline: user.headline || "",
+    bio: user.bio || "",
+    skills: user.skills || [],
+    status: user.status || "active",
+    experienceYears: user.experienceYears || 0,
+    joinedAt: user.joinedAt || null,
+    isTemporaryPassword: user.isTemporaryPassword,
+    setupCompleted: user.setupCompleted,
+    preferences: user.preferences || { theme: "light", notifications: { email: true, push: true } },
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+});
+const developerCustomId = async () => {
+    let next = await User_1.default.countDocuments({ role: "developer" });
+    while (true) {
+        next += 1;
+        const candidate = `DEV-${String(next).padStart(4, "0")}`;
+        const exists = await User_1.default.exists({ customId: candidate });
+        if (!exists)
+            return candidate;
+    }
+};
+const isAdmin = (user) => user?.role === 'admin';
+const isSuperAdmin = (user) => isAdmin(user) && (user.adminLevel || 'super') === 'super';
+const normalizeManagedUserPayload = (body) => ({
+    name: String(body.name || '').trim(),
+    email: String(body.email || '').trim().toLowerCase(),
+    phone: String(body.phone || '').trim(),
+    company: String(body.company || '').trim(),
+});
 class UserController {
     async getCurrentUser(req, res) {
         try {
@@ -24,20 +69,7 @@ class UserController {
                 res.status(404).json({ success: false, message: "User not found" });
                 return;
             }
-            res.status(200).json({
-                success: true,
-                user: {
-                    id: user._id,
-                    name: user.name,
-                    email: user.email,
-                    phone: user.phone || '',
-                    company: user.company || '',
-                    role: user.role || 'client',
-                    avatar: user.avatar || '',
-                    preferences: user.preferences || { theme: 'light', notifications: { email: true, push: true } },
-                    createdAt: user.createdAt,
-                }
-            });
+            res.status(200).json({ success: true, user: buildUserResponse(user) });
         }
         catch (error) {
             console.error("Get current user error:", error);
@@ -48,28 +80,28 @@ class UserController {
      * Update user profile
      * PUT /api/users/profile
      * Requires: Authentication token
-     * Body: { name?, email?, phone?, company?, preferences? }
+     * Body: { name?, email?, phone?, company?, avatar?, preferences? }
      */
     async updateUserProfile(req, res) {
         try {
             const userId = req.userId;
-            const { name, email, phone, company, preferences } = req.body;
+            const { name, email, phone, company, preferences, avatar, headline, bio, skills } = req.body;
             if (!userId) {
                 res.status(401).json({ success: false, message: "Unauthorized" });
                 return;
             }
-            const updateData = {};
-            if (name)
-                updateData.name = name;
-            if (email)
-                updateData.email = email;
-            if (phone)
-                updateData.phone = phone;
-            if (company)
-                updateData.company = company;
-            if (preferences)
-                updateData.preferences = preferences;
-            const updatedUser = await User_1.default.findByIdAndUpdate(userId, { ...updateData, updatedAt: new Date() }, { new: true, runValidators: true }).select('-password');
+            const updatedUser = await User_1.default.findByIdAndUpdate(userId, {
+                ...(name !== undefined ? { name } : {}),
+                ...(email !== undefined ? { email } : {}),
+                ...(phone !== undefined ? { phone } : {}),
+                ...(company !== undefined ? { company } : {}),
+                ...(preferences !== undefined ? { preferences } : {}),
+                ...(avatar !== undefined ? { avatar } : {}),
+                ...(headline !== undefined ? { headline } : {}),
+                ...(bio !== undefined ? { bio } : {}),
+                ...(skills !== undefined ? { skills } : {}),
+                updatedAt: new Date(),
+            }, { new: true, runValidators: true }).select("-password");
             if (!updatedUser) {
                 res.status(404).json({ success: false, message: "User not found" });
                 return;
@@ -154,8 +186,29 @@ class UserController {
                 res.status(409).json({ success: false, message: "A user with this email already exists" });
                 return;
             }
-            const users = await User_1.default.find({ role }).select('_id name email role company');
-            res.status(200).json({
+            const tempPassword = crypto_1.default.randomBytes(4).toString("hex");
+            const developer = await User_1.default.create({
+                name,
+                email: String(email).toLowerCase(),
+                password: await bcryptjs_1.default.hash(tempPassword, 10),
+                phone: phone || "",
+                company: company || "",
+                role: "developer",
+                customId: await developerCustomId(),
+                isTemporaryPassword: true,
+                setupCompleted: false,
+                skills,
+                headline,
+                bio,
+                experienceYears: Number(experienceYears) || 0,
+                status,
+                joinedAt: joinedAt ? new Date(joinedAt) : null,
+                published: Boolean(published),
+            });
+            if ((0, email_service_1.isEmailConfigured)()) {
+                await (0, email_service_1.sendEmail)(developer.email, "Your Websmith developer account", `Developer ID: ${developer.customId}\nTemporary Password: ${tempPassword}`, `<p>Your Websmith developer account is ready.</p><p><strong>Developer ID:</strong> ${developer.customId}</p><p><strong>Temporary Password:</strong> ${tempPassword}</p>`);
+            }
+            res.status(201).json({
                 success: true,
                 data: buildUserResponse(developer),
                 temporaryPassword: (0, email_service_1.isEmailConfigured)() ? undefined : tempPassword,
@@ -201,6 +254,13 @@ class UserController {
                 res.status(404).json({ success: false, message: "Developer not found" });
                 return;
             }
+            await Project_1.Project.updateMany({ assignedDevId: id }, { $set: { assignedDevId: null } });
+            await Task_1.Task.updateMany({ developerId: id }, {
+                $set: {
+                    developerId: null,
+                    assignee: "",
+                },
+            });
             res.status(200).json({ success: true, message: "Developer deleted successfully" });
         }
         catch (error) {
@@ -223,33 +283,6 @@ class UserController {
     async getMyNotifications(req, res) {
         try {
             const userId = req.userId;
-            const notifications = await Notification_1.default.find({ recipientId: userId }).sort({ createdAt: -1 }).limit(50);
-            res.status(200).json({ success: true, data: notifications });
-        }
-        catch (error) {
-            console.error("Get notifications error:", error);
-            res.status(500).json({ success: false, message: "Failed to fetch notifications" });
-        }
-    }
-    async markNotificationRead(req, res) {
-        try {
-            const userId = req.userId;
-            const { id } = req.params;
-            const notification = await Notification_1.default.findOneAndUpdate({ _id: id, recipientId: userId }, { isRead: true }, { new: true });
-            if (!notification) {
-                res.status(404).json({ success: false, message: "Notification not found" });
-                return;
-            }
-            res.status(200).json({ success: true, data: notification });
-        }
-        catch (error) {
-            console.error("Mark notification read error:", error);
-            res.status(500).json({ success: false, message: "Failed to update notification" });
-        }
-    }
-    async getMyNotifications(req, res) {
-        try {
-            const userId = req.userId;
             if (!userId) {
                 res.status(401).json({ success: false, message: 'Unauthorized' });
                 return;
@@ -264,7 +297,22 @@ class UserController {
             res.status(500).json({ success: false, message: 'Failed to fetch notifications' });
         }
     }
-    async markMyNotificationRead(req, res) {
+    async markAllNotificationsRead(req, res) {
+        try {
+            const userId = req.userId;
+            if (!userId) {
+                res.status(401).json({ success: false, message: 'Unauthorized' });
+                return;
+            }
+            await Notification_1.default.updateMany({ recipientId: userId, isRead: false }, { isRead: true });
+            res.status(200).json({ success: true, message: "All notifications marked as read" });
+        }
+        catch (error) {
+            console.error("Mark all notifications read error:", error);
+            res.status(500).json({ success: false, message: "Failed to update notifications" });
+        }
+    }
+    async markNotificationRead(req, res) {
         try {
             const userId = req.userId;
             const { id } = req.params;
@@ -272,12 +320,16 @@ class UserController {
                 res.status(401).json({ success: false, message: 'Unauthorized' });
                 return;
             }
-            await Notification_1.default.findOneAndUpdate({ _id: id, recipientId: userId }, { isRead: true });
-            res.status(200).json({ success: true, message: 'Notification marked as read' });
+            const notification = await Notification_1.default.findOneAndUpdate({ _id: id, recipientId: userId }, { isRead: true }, { new: true });
+            if (!notification) {
+                res.status(404).json({ success: false, message: "Notification not found" });
+                return;
+            }
+            res.status(200).json({ success: true, data: notification });
         }
         catch (error) {
-            console.error('Mark my notification read error:', error);
-            res.status(500).json({ success: false, message: 'Failed to update notification' });
+            console.error("Mark notification read error:", error);
+            res.status(500).json({ success: false, message: "Failed to update notification" });
         }
     }
     async createManagedUser(req, res) {
@@ -407,6 +459,15 @@ class UserController {
             if (targetUser.role === 'admin' && (targetUser.adminLevel || 'super') === 'super') {
                 res.status(403).json({ success: false, message: 'Super admin account cannot be deleted here' });
                 return;
+            }
+            if (targetUser.role === "developer") {
+                await Project_1.Project.updateMany({ assignedDevId: id }, { $set: { assignedDevId: null } });
+                await Task_1.Task.updateMany({ developerId: id }, {
+                    $set: {
+                        developerId: null,
+                        assignee: "",
+                    },
+                });
             }
             await User_1.default.findByIdAndDelete(id);
             res.status(200).json({ success: true, message: 'User deleted successfully' });

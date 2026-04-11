@@ -6,7 +6,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteTask = exports.updateTask = exports.createTask = exports.getTaskById = exports.getTasks = void 0;
+exports.addSubtask = exports.toggleSubtask = exports.addTaskComment = exports.bulkUpdateTaskStatus = exports.updateTaskStatus = exports.deleteTask = exports.updateTask = exports.createTask = exports.getTaskById = exports.getTasks = void 0;
 const Task_1 = require("../models/Task");
 const mongoose_1 = __importDefault(require("mongoose"));
 const Project_1 = require("../models/Project");
@@ -108,25 +108,31 @@ const createTask = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Unauthorized" });
         }
-        if (role !== "admin") {
-            return res.status(403).json({ message: "Only admins can create tasks" });
+        if (role !== "admin" && role !== "developer") {
+            return res.status(403).json({ message: "Only admins and developers can create tasks" });
         }
         // Validate required fields
         if (!title) {
             return res.status(400).json({ message: "Missing required field: title" });
         }
+        // Resolve project, client, and developer IDs
         let resolvedClientId = clientId || null;
         let resolvedDeveloperId = developerId || null;
         let resolvedAssignee = assignee || "";
         let resolvedProjectId = projectId || null;
+        let taskOwnerId = userId; // Default to current user
         if (projectId) {
-            const project = await Project_1.Project.findOne({ _id: projectId, userId });
+            const project = await Project_1.Project.findById(projectId);
             if (!project) {
                 return res.status(404).json({ message: "Project not found" });
             }
             resolvedProjectId = String(project._id);
             resolvedClientId = resolvedClientId || String(project.clientId || "");
             resolvedDeveloperId = resolvedDeveloperId || String(project.assignedDevId || "");
+            // If developer is creating task, set owner to project owner (admin)
+            if (role === "developer") {
+                taskOwnerId = String(project.userId);
+            }
         }
         if (resolvedDeveloperId) {
             const developer = await User_1.default.findOne({ _id: resolvedDeveloperId, role: "developer" });
@@ -135,8 +141,16 @@ const createTask = async (req, res) => {
             }
             resolvedAssignee = developer.name;
         }
+        // If developer is creating task without project, auto-assign to themselves
+        if (role === "developer" && !resolvedDeveloperId) {
+            resolvedDeveloperId = userId;
+            const developer = await User_1.default.findById(userId);
+            if (developer) {
+                resolvedAssignee = developer.name;
+            }
+        }
         const task = await Task_1.Task.create({
-            userId,
+            userId: taskOwnerId,
             title,
             description: description || "",
             projectId: resolvedProjectId || null,
@@ -148,7 +162,18 @@ const createTask = async (req, res) => {
             assignee: resolvedAssignee,
             subtasks,
         });
-        if (resolvedDeveloperId) {
+        // Send notification to admin when developer creates task
+        if (role === "developer" && task.userId) {
+            await Notification_1.default.create({
+                recipientId: task.userId,
+                senderId: userId,
+                type: "task_created_by_developer",
+                message: `New task created by developer: ${title}`,
+                metadata: { taskId: task._id, projectId: resolvedProjectId },
+            });
+        }
+        // Send notification to developer when admin assigns task
+        if (role === "admin" && resolvedDeveloperId) {
             await Notification_1.default.create({
                 recipientId: resolvedDeveloperId,
                 senderId: userId,
@@ -195,6 +220,10 @@ const updateTask = async (req, res) => {
         if ("invalid" in normalizedClientId) {
             return res.status(400).json({ message: "Invalid clientId" });
         }
+        const normalizedDeveloperId = normalizeNullableObjectId(developerId);
+        if ("invalid" in normalizedDeveloperId) {
+            return res.status(400).json({ message: "Invalid developerId" });
+        }
         const normalizedDueDate = normalizeNullableDate(dueDate);
         if ("invalid" in normalizedDueDate) {
             return res.status(400).json({ message: "Invalid dueDate" });
@@ -207,8 +236,8 @@ const updateTask = async (req, res) => {
             task.projectId = normalizedProjectId.value;
         if (role === "admin" && normalizedClientId.hasValue)
             task.clientId = normalizedClientId.value;
-        if (role === "admin" && developerId !== undefined) {
-            task.developerId = developerId ? new mongoose_1.default.Types.ObjectId(String(developerId)) : null;
+        if (role === "admin" && normalizedDeveloperId.hasValue) {
+            task.developerId = normalizedDeveloperId.value;
         }
         if (status)
             task.status = status;
@@ -275,3 +304,135 @@ const deleteTask = async (req, res) => {
     }
 };
 exports.deleteTask = deleteTask;
+const updateTaskStatus = async (req, res) => {
+    return (0, exports.updateTask)(req, res);
+};
+exports.updateTaskStatus = updateTaskStatus;
+// Bulk update task statuses (for Kanban drag-and-drop)
+const bulkUpdateTaskStatus = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        const role = req.user?.role;
+        const { updates } = req.body; // [{ id, status }]
+        if (!userId) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        if (!role || !["admin", "developer"].includes(role)) {
+            return res.status(403).json({ message: "Only admins and developers can bulk update tasks" });
+        }
+        if (!Array.isArray(updates) || updates.length === 0) {
+            return res.status(400).json({ message: "Updates array is required" });
+        }
+        const results = [];
+        for (const update of updates) {
+            const scope = role === "admin"
+                ? { _id: update.id, userId }
+                : { _id: update.id, developerId: userId };
+            const task = await Task_1.Task.findOne(scope);
+            if (!task)
+                continue;
+            if (update.status) {
+                task.status = update.status;
+                if (update.status === "completed" && !task.completedAt) {
+                    task.completedAt = new Date();
+                }
+            }
+            await task.save();
+            // Send notification if task is completed
+            if (task.status === "completed" && task.userId && task.clientId) {
+                const recipients = [task.userId, task.clientId].filter(Boolean);
+                if (recipients.length > 0) {
+                    await Notification_1.default.insertMany(recipients.map((recipientId) => ({
+                        recipientId,
+                        senderId: userId,
+                        type: "task_completed",
+                        message: `${task.title} has been marked as completed`,
+                        metadata: { taskId: task._id, projectId: task.projectId },
+                    })));
+                }
+            }
+            results.push({ id: update.id, success: true });
+        }
+        res.json({ success: true, data: results });
+    }
+    catch (error) {
+        console.error("Bulk update tasks error:", error);
+        res.status(500).json({ message: "Failed to bulk update tasks" });
+    }
+};
+exports.bulkUpdateTaskStatus = bulkUpdateTaskStatus;
+const addTaskComment = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        const user = req.user;
+        const { id } = req.params;
+        const { content } = req.body;
+        if (!userId || !content) {
+            return res.status(400).json({ message: "Content is required" });
+        }
+        const task = await Task_1.Task.findById(id);
+        if (!task) {
+            return res.status(404).json({ message: "Task not found" });
+        }
+        task.comments.push({
+            userId: new mongoose_1.default.Types.ObjectId(userId),
+            authorName: user?.name || "Unknown",
+            content,
+            createdAt: new Date(),
+        });
+        await task.save();
+        res.json({ success: true, data: task.comments });
+    }
+    catch (error) {
+        console.error("Add task comment error:", error);
+        res.status(500).json({ message: "Failed to add comment" });
+    }
+};
+exports.addTaskComment = addTaskComment;
+const toggleSubtask = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        const { id, subtaskId } = req.params;
+        if (!userId) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        const task = await Task_1.Task.findById(id);
+        if (!task) {
+            return res.status(404).json({ message: "Task not found" });
+        }
+        const subtask = task.subtasks.id(subtaskId);
+        if (!subtask) {
+            return res.status(404).json({ message: "Subtask not found" });
+        }
+        subtask.completed = !subtask.completed;
+        await task.save();
+        res.json({ success: true, data: task.subtasks });
+    }
+    catch (error) {
+        console.error("Toggle subtask error:", error);
+        res.status(500).json({ message: "Failed to toggle subtask" });
+    }
+};
+exports.toggleSubtask = toggleSubtask;
+const addSubtask = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        const { id } = req.params;
+        const { title } = req.body;
+        if (!userId || !title) {
+            return res.status(400).json({ message: "Title is required" });
+        }
+        const task = await Task_1.Task.findById(id);
+        if (!task) {
+            return res.status(404).json({ message: "Task not found" });
+        }
+        task.subtasks.push({ title, completed: false });
+        await task.save();
+        res.json({ success: true, data: task.subtasks });
+    }
+    catch (error) {
+        console.error("Add subtask error:", error);
+        res.status(500).json({ message: "Failed to add subtask" });
+    }
+};
+exports.addSubtask = addSubtask;

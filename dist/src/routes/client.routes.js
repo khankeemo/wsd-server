@@ -25,4 +25,6 @@ router.post("/", client_controller_1.createClient);
 router.put("/:id", client_controller_1.updateClient);
 // DELETE /api/clients/:id - Delete client
 router.delete("/:id", client_controller_1.deleteClient);
+// PATCH /api/clients/:id/publish - Toggle client publish status
+router.patch("/:id/publish", client_controller_1.togglePublish);
 exports.default = router;

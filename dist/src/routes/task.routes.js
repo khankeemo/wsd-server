@@ -20,6 +20,16 @@ router.get("/:id", task_controller_1.getTaskById);
 router.post("/", task_controller_1.createTask);
 // PUT /api/tasks/:id - Update task
 router.put("/:id", task_controller_1.updateTask);
+// PUT /api/tasks/:id/status - Update task status
+router.put("/:id/status", task_controller_1.updateTaskStatus);
 // DELETE /api/tasks/:id - Delete task
 router.delete("/:id", task_controller_1.deleteTask);
+// POST /api/tasks/bulk-status - Bulk update task statuses (for Kanban)
+router.post("/bulk-status", task_controller_1.bulkUpdateTaskStatus);
+// POST /api/tasks/:id/comments - Add comment to task
+router.post("/:id/comments", task_controller_1.addTaskComment);
+// POST /api/tasks/:id/subtasks - Add subtask
+router.post("/:id/subtasks", task_controller_1.addSubtask);
+// PATCH /api/tasks/:id/subtasks/:subtaskId - Toggle subtask completion
+router.patch("/:id/subtasks/:subtaskId", task_controller_1.toggleSubtask);
 exports.default = router;

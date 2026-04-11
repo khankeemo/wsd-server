@@ -6,10 +6,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteClient = exports.updateClient = exports.createClient = exports.getClientById = exports.getClients = void 0;
+exports.togglePublish = exports.deleteClient = exports.updateClient = exports.createClient = exports.getClientById = exports.getClients = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const crypto_1 = __importDefault(require("crypto"));
 const Client_1 = require("../models/Client");
+const Project_1 = require("../models/Project");
+const Task_1 = require("../models/Task");
 const User_1 = __importDefault(require("../models/User"));
 const email_service_1 = require("../services/email.service");
 // Helper to get userId from request
@@ -278,6 +280,21 @@ const deleteClient = async (req, res) => {
         if (client.userId && String(client.userId) !== adminId) {
             await User_1.default.findByIdAndDelete(client.userId);
         }
+        await Project_1.Project.updateMany({ clientId: client.userId }, {
+            $set: {
+                clientId: null,
+                customClientId: "",
+                client: client.name,
+                clientEmail: client.email,
+                clientPhone: client.phone || "",
+                clientCompany: client.company || "",
+            },
+        });
+        await Task_1.Task.updateMany({ clientId: client.userId }, {
+            $set: {
+                clientId: null,
+            },
+        });
         // 3. Delete the Client profile
         await Client_1.Client.findByIdAndDelete(id);
         res.json({ success: true, message: "Client and associated user account deleted successfully" });
@@ -288,3 +305,27 @@ const deleteClient = async (req, res) => {
     }
 };
 exports.deleteClient = deleteClient;
+// Toggle client publish status
+const togglePublish = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { published } = req.body;
+        const adminId = getUserId(req);
+        if (!adminId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+        const client = await Client_1.Client.findOne({ _id: id, ...buildAdminOwnershipQuery(adminId) });
+        if (!client) {
+            return res.status(404).json({ success: false, message: "Client not found" });
+        }
+        client.published = published;
+        await client.save();
+        await User_1.default.findByIdAndUpdate(client.userId, { published });
+        res.json({ success: true, data: client });
+    }
+    catch (error) {
+        console.error("Toggle publish error:", error);
+        res.status(500).json({ success: false, message: "Failed to update publish status" });
+    }
+};
+exports.togglePublish = togglePublish;

@@ -7,7 +7,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPublishedProjects = exports.getAllProjectsStatus = exports.getProjectStatus = exports.updateCustomization = exports.updateProjectStatus = exports.getFeedback = exports.addFeedback = exports.getMessages = exports.addMessage = exports.updateProgress = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProjectById = exports.getProjects = void 0;
+exports.togglePublish = exports.bulkUpdateProjectStatus = exports.getPublishedProjects = exports.getAllProjectsStatus = exports.getProjectStatus = exports.updateCustomization = exports.updateProjectStatus = exports.getFeedback = exports.addFeedback = exports.getMessages = exports.addMessage = exports.updateProgress = exports.deleteProject = exports.updateProject = exports.createProject = exports.getProjectById = exports.getProjects = void 0;
 const Project_1 = require("../models/Project");
 const User_1 = __importDefault(require("../models/User"));
 const Notification_1 = __importDefault(require("../models/Notification"));
@@ -632,3 +632,70 @@ const getPublishedProjects = async (_req, res) => {
     }
 };
 exports.getPublishedProjects = getPublishedProjects;
+// Bulk update project statuses (for Kanban drag-and-drop)
+const bulkUpdateProjectStatus = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        const role = req.user?.role;
+        const { updates } = req.body; // [{ id, status, progress }]
+        if (!userId) {
+            return res.status(401).json({ message: "Unauthorized" });
+        }
+        if (!role || !["admin", "developer"].includes(role)) {
+            return res.status(403).json({ message: "Only admins and developers can bulk update projects" });
+        }
+        if (!Array.isArray(updates) || updates.length === 0) {
+            return res.status(400).json({ message: "Updates array is required" });
+        }
+        const results = [];
+        for (const update of updates) {
+            const project = await findAccessibleProject(req, update.id);
+            if (!project)
+                continue;
+            if (update.status) {
+                project.status = update.status;
+            }
+            if (typeof update.progress === "number") {
+                project.progress = update.progress;
+            }
+            project.statusUpdates.push({
+                status: project.status,
+                progress: project.progress,
+                note: "Status updated via Kanban",
+                updatedBy: userId,
+                createdAt: new Date()
+            });
+            await project.save();
+            results.push({ id: update.id, success: true });
+        }
+        res.json({ success: true, data: results });
+    }
+    catch (error) {
+        console.error("Bulk update projects error:", error);
+        res.status(500).json({ message: "Failed to bulk update projects" });
+    }
+};
+exports.bulkUpdateProjectStatus = bulkUpdateProjectStatus;
+// Toggle project publish status
+const togglePublish = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { published } = req.body;
+        const userId = getUserId(req);
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+        const project = await Project_1.Project.findOne({ _id: id, userId });
+        if (!project) {
+            return res.status(404).json({ success: false, message: "Project not found" });
+        }
+        project.published = published;
+        await project.save();
+        res.json({ success: true, data: mapProjectResponse(project) });
+    }
+    catch (error) {
+        console.error("Toggle publish error:", error);
+        res.status(500).json({ success: false, message: "Failed to update publish status" });
+    }
+};
+exports.togglePublish = togglePublish;

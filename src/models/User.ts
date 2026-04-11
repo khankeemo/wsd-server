@@ -9,8 +9,7 @@ export interface IUser extends Document {
   password: string;
   phone?: string;
   company?: string;
-role: "admin" | "client" | "developer";
-role: 'admin' | 'client' | 'developer';
+  role: "admin" | "client" | "developer";
   adminLevel?: 'super' | 'sub' | null;
   avatar?: string;
   preferences: {

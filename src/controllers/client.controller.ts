@@ -6,6 +6,8 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { Client } from "../models/Client";
+import { Project } from "../models/Project";
+import { Task } from "../models/Task";
 import User from "../models/User";
 import { sendEmail, escapeHtml, isEmailConfigured } from "../services/email.service";
 
@@ -323,6 +325,29 @@ export const deleteClient = async (req: Request, res: Response) => {
       await User.findByIdAndDelete(client.userId);
     }
 
+    await Project.updateMany(
+      { clientId: client.userId },
+      {
+        $set: {
+          clientId: null,
+          customClientId: "",
+          client: client.name,
+          clientEmail: client.email,
+          clientPhone: client.phone || "",
+          clientCompany: client.company || "",
+        },
+      }
+    );
+
+    await Task.updateMany(
+      { clientId: client.userId },
+      {
+        $set: {
+          clientId: null,
+        },
+      }
+    );
+
     // 3. Delete the Client profile
     await Client.findByIdAndDelete(id);
 
@@ -351,6 +376,7 @@ export const togglePublish = async (req: Request, res: Response) => {
 
     client.published = published;
     await client.save();
+    await User.findByIdAndUpdate(client.userId, { published });
 
     res.json({ success: true, data: client });
   } catch (error) {

@@ -6,6 +6,8 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { Project } from "../models/Project";
+import { Task } from "../models/Task";
 import User from "../models/User";
 import Notification from "../models/Notification";
 import { sendEmail, isEmailConfigured, escapeHtml } from "../services/email.service";
@@ -297,6 +299,18 @@ export class UserController {
         res.status(404).json({ success: false, message: "Developer not found" });
         return;
       }
+
+      await Project.updateMany({ assignedDevId: id }, { $set: { assignedDevId: null } });
+      await Task.updateMany(
+        { developerId: id },
+        {
+          $set: {
+            developerId: null,
+            assignee: "",
+          },
+        }
+      );
+
       res.status(200).json({ success: true, message: "Developer deleted successfully" });
     } catch (error) {
       console.error("Delete developer error:", error);
@@ -526,6 +540,19 @@ export class UserController {
       if (targetUser.role === 'admin' && (targetUser.adminLevel || 'super') === 'super') {
         res.status(403).json({ success: false, message: 'Super admin account cannot be deleted here' });
         return;
+      }
+
+      if (targetUser.role === "developer") {
+        await Project.updateMany({ assignedDevId: id }, { $set: { assignedDevId: null } });
+        await Task.updateMany(
+          { developerId: id },
+          {
+            $set: {
+              developerId: null,
+              assignee: "",
+            },
+          }
+        );
       }
 
       await User.findByIdAndDelete(id);
