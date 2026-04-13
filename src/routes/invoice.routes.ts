@@ -6,6 +6,7 @@ import { authMiddleware } from '../middleware/auth.middleware';
 import {
   createInvoice,
   deleteInvoice,
+  downloadInvoicePDF,
   getInvoiceById,
   getInvoices,
   getInvoiceStats,
@@ -40,8 +41,6 @@ router.delete('/:id', deleteInvoice);
 router.patch('/:id/paid', markInvoicePaid);
 
 // GET /api/invoices/:id/download - Download invoice PDF
-router.get('/:id/download', (req, res) => {
-  res.status(200).json({ success: true, message: 'Download endpoint' });
-});
+router.get('/:id/download', downloadInvoicePDF);
 
 export default router;

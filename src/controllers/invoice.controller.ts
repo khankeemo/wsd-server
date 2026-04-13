@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Invoice from "../models/Invoice";
 import { Project } from "../models/Project";
 import User from "../models/User";
+import PDFDocument from "pdfkit";
 
 const getInvoiceScope = (req: Request) => {
   const user = (req as any).user;
@@ -195,5 +196,127 @@ export const getInvoiceStats = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Get invoice stats error:", error);
     res.status(500).json({ success: false, message: "Failed to fetch invoice stats" });
+  }
+};
+
+export const downloadInvoicePDF = async (req: Request, res: Response) => {
+  try {
+    const scope = getInvoiceScope(req);
+    if (!scope) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const invoice = await Invoice.findOne({ _id: req.params.id, ...scope });
+    if (!invoice) return res.status(404).json({ success: false, message: "Invoice not found" });
+
+    // Create PDF document
+    const doc = new PDFDocument({ margin: 50 });
+    
+    // Set response headers for PDF download
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=invoice-${invoice.invoiceNumber}.pdf`);
+    
+    // Pipe PDF to response
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(28).font("Helvetica-Bold").text("INVOICE", { align: "center" });
+    doc.moveDown(0.5);
+    
+    // Invoice details
+    doc.fontSize(12).font("Helvetica-Normal");
+    doc.text(`Invoice Number: ${invoice.invoiceNumber}`, { align: "right" });
+    doc.text(`Issue Date: ${new Date(invoice.issueDate).toLocaleDateString()}`, { align: "right" });
+    doc.text(`Due Date: ${new Date(invoice.dueDate).toLocaleDateString()}`, { align: "right" });
+    doc.text(`Status: ${invoice.status.toUpperCase()}`, { align: "right" });
+    doc.moveDown(1);
+
+    // Client information
+    doc.fontSize(16).font("Helvetica-Bold").text("Bill To:", { underline: true });
+    doc.moveDown(0.3);
+    doc.fontSize(12).font("Helvetica-Normal");
+    doc.text(invoice.clientName);
+    doc.text(invoice.clientEmail);
+    if (invoice.clientAddress) {
+      doc.text(invoice.clientAddress);
+    }
+    doc.moveDown(1);
+
+    // Items table header
+    const tableTop = doc.y;
+    const itemX = 50;
+    const descX = 150;
+    const qtyX = 350;
+    const rateX = 420;
+    const amountX = 500;
+
+    doc.fontSize(12).font("Helvetica-Bold");
+    doc.text("Description", descX, tableTop, { width: 150 });
+    doc.text("Qty", qtyX, tableTop, { width: 50, align: "center" });
+    doc.text("Rate", rateX, tableTop, { width: 60, align: "right" });
+    doc.text("Amount", amountX, tableTop, { width: 70, align: "right" });
+    
+    // Draw line
+    doc.moveTo(50, doc.y + 5).lineTo(550, doc.y + 5).stroke();
+    doc.moveDown(0.5);
+
+    // Items
+    doc.fontSize(11).font("Helvetica-Normal");
+    let currentY = doc.y;
+    invoice.items.forEach((item, index) => {
+      doc.text(item.description, descX, currentY, { width: 150 });
+      doc.text(String(item.quantity), qtyX, currentY, { width: 50, align: "center" });
+      doc.text(`$${item.rate.toFixed(2)}`, rateX, currentY, { width: 60, align: "right" });
+      doc.text(`$${item.amount.toFixed(2)}`, amountX, currentY, { width: 70, align: "right" });
+      currentY += 25;
+      if (index < invoice.items.length - 1) {
+        doc.moveTo(50, currentY - 5).lineTo(550, currentY - 5).stroke();
+      }
+    });
+
+    doc.y = currentY + 10;
+    
+    // Draw line before totals
+    doc.moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown(0.5);
+
+    // Totals
+    const subtotal = invoice.items.reduce((sum, item) => sum + item.amount, 0);
+    doc.fontSize(12).font("Helvetica-Bold");
+    doc.text("Subtotal:", rateX, doc.y, { width: 60, align: "right" });
+    doc.text(`$${subtotal.toFixed(2)}`, amountX, doc.y, { width: 70, align: "right" });
+    doc.moveDown(0.5);
+
+    if (invoice.tax > 0) {
+      doc.text("Tax:", rateX, doc.y, { width: 60, align: "right" });
+      doc.text(`$${invoice.tax.toFixed(2)}`, amountX, doc.y, { width: 70, align: "right" });
+      doc.moveDown(0.5);
+    }
+
+    if (invoice.discount > 0) {
+      doc.text("Discount:", rateX, doc.y, { width: 60, align: "right" });
+      doc.text(`-$${invoice.discount.toFixed(2)}`, amountX, doc.y, { width: 70, align: "right" });
+      doc.moveDown(0.5);
+    }
+
+    // Total amount
+    doc.fontSize(16).font("Helvetica-Bold");
+    doc.text("Total:", rateX, doc.y, { width: 60, align: "right" });
+    doc.text(`$${invoice.amount.toFixed(2)}`, amountX, doc.y, { width: 70, align: "right" });
+    
+    // Notes
+    if (invoice.notes) {
+      doc.moveDown(2);
+      doc.fontSize(12).font("Helvetica-Bold").text("Notes:", { underline: true });
+      doc.moveDown(0.3);
+      doc.fontSize(11).font("Helvetica-Normal").text(invoice.notes);
+    }
+
+    // Footer
+    doc.fontSize(10).text("Thank you for your business!", 50, doc.page.height - 100, { align: "center" });
+
+    // Finalize PDF
+    doc.end();
+  } catch (error) {
+    console.error("Download invoice PDF error:", error);
+    res.status(500).json({ success: false, message: "Failed to generate invoice PDF" });
   }
 };
