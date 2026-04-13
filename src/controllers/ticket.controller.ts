@@ -6,9 +6,12 @@ import Notification from "../models/Notification";
 import { sendEmail, isEmailConfigured, escapeHtml } from "../services/email.service";
 
 const isQueryNotificationEnabled = async (recipientId: any) => {
+  if (!recipientId) return false;
   const recipient = await User.findById(recipientId).select("preferences.notifications");
   return recipient?.preferences?.notifications?.queryResponses !== false;
 };
+
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const getTicketScope = (req: Request) => {
   const user = (req as any).user;
@@ -64,6 +67,10 @@ export const createTicket = async (req: Request, res: Response) => {
       adminId: project?.userId || null,
       developerId: project?.assignedDevId || null,
       projectId: project?._id || null,
+      source: "client_portal",
+      contactName: "",
+      contactEmail: "",
+      contactCompany: "",
       subject,
       description,
       priority: priority || "medium",
@@ -289,6 +296,129 @@ export const deleteTicket = async (req: Request, res: Response) => {
   }
 };
 
+export const addTicketReply = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const userId = (req as any).userId;
+    const { id } = req.params;
+    const message = String(req.body.message || "").trim();
+
+    if (!user || !userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    if (!message) {
+      return res.status(400).json({ success: false, message: "Reply message is required" });
+    }
+
+    const scope =
+      user.role === "admin"
+        ? { _id: id }
+        : user.role === "developer"
+          ? { _id: id, developerId: userId }
+          : { _id: id, clientId: userId };
+
+    const ticket = await Ticket.findOne(scope);
+    if (!ticket) {
+      return res.status(404).json({ success: false, message: "Ticket not found" });
+    }
+
+    ticket.history.push({
+      action: "reply",
+      actorId: userId,
+      actorRole: user.role,
+      message,
+      createdAt: new Date(),
+    } as any);
+
+    if ((user.role === "admin" || user.role === "developer") && ticket.status === "open") {
+      ticket.status = "in_progress";
+    }
+
+    await ticket.save();
+
+    if (ticket.clientId && user.role !== "client" && (await isQueryNotificationEnabled(ticket.clientId))) {
+      await Notification.create({
+        recipientId: ticket.clientId,
+        senderId: userId,
+        type: "query_updated",
+        message: `${ticket.subject} has a new reply`,
+        metadata: { ticketId: ticket._id, status: ticket.status, reply: message },
+      });
+    }
+
+    res.json({ success: true, data: ticket });
+  } catch (error) {
+    console.error("Add ticket reply error:", error);
+    res.status(500).json({ success: false, message: "Failed to add reply" });
+  }
+};
+
+export const createPublicTicket = async (req: Request, res: Response) => {
+  try {
+    const contactName = String(req.body.name || "").trim();
+    const contactEmail = String(req.body.email || "").trim().toLowerCase();
+    const contactCompany = String(req.body.company || "").trim();
+    const subject = String(req.body.subject || "").trim();
+    const description = String(req.body.message || req.body.description || "").trim();
+
+    if (!contactName || !contactEmail || !subject || !description) {
+      return res.status(400).json({ success: false, message: "Name, email, subject, and message are required" });
+    }
+
+    if (!emailPattern.test(contactEmail)) {
+      return res.status(400).json({ success: false, message: "A valid email address is required" });
+    }
+
+    const ticket = await Ticket.create({
+      clientId: null,
+      adminId: null,
+      developerId: null,
+      projectId: null,
+      source: "public_contact",
+      contactName,
+      contactEmail,
+      contactCompany,
+      subject,
+      description,
+      priority: "medium",
+      status: "open",
+      history: [
+        {
+          action: "created",
+          actorId: null,
+          actorRole: "system",
+          message: description,
+          createdAt: new Date(),
+        },
+      ],
+    });
+
+    const admins = await User.find({ role: "admin" }).select("_id");
+    if (admins.length > 0) {
+      await Notification.insertMany(
+        admins.map((admin) => ({
+          recipientId: admin._id,
+          senderId: null,
+          type: "query_created",
+          message: `New public inquiry from ${contactName}: "${subject}"`,
+          metadata: {
+            ticketId: String(ticket._id),
+            source: "public_contact",
+            contactEmail,
+            contactCompany,
+          },
+        }))
+      );
+    }
+
+    res.status(201).json({ success: true, data: ticket });
+  } catch (error) {
+    console.error("Create public ticket error:", error);
+    res.status(500).json({ success: false, message: "Failed to submit inquiry" });
+  }
+};
+
 export const bulkUpdateTicketStatus = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
@@ -363,7 +493,8 @@ export const sendResolutionEmail = async (req: Request, res: Response) => {
     }
 
     const client = ticket.clientId as any;
-    if (!client?.email) {
+    const recipientEmail = client?.email || ticket.contactEmail;
+    if (!recipientEmail) {
       return res.status(400).json({ success: false, message: "Client email not available" });
     }
 
@@ -379,7 +510,7 @@ export const sendResolutionEmail = async (req: Request, res: Response) => {
       </div>
     `;
 
-    await sendEmail(client.email, emailSubject, emailText, emailHtml);
+    await sendEmail(recipientEmail, emailSubject, emailText, emailHtml);
 
     res.json({ success: true, message: "Resolution email sent successfully" });
   } catch (error) {

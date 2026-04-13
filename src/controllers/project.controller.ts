@@ -156,7 +156,7 @@ export const getProjectById = async (req: Request, res: Response) => {
 export const createProject = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
-    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, published } = req.body;
+    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, publicUrl, published } = req.body;
     const role = (req as any).user?.role;
 
     if (!userId) {
@@ -189,6 +189,7 @@ export const createProject = async (req: Request, res: Response) => {
       clientEmail: clientEmail || clientUser.email,
       clientPhone: clientPhone || clientUser.phone || "",
       clientCompany: clientCompany || clientUser.company || "",
+      publicUrl: publicUrl || "",
       status: status || "pending",
       priority: priority || "medium",
       projectType: projectType || "other",
@@ -228,7 +229,7 @@ export const updateProject = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, published } = req.body;
+    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, publicUrl, published } = req.body;
     const role = (req as any).user?.role;
 
     if (!userId) {
@@ -266,6 +267,7 @@ export const updateProject = async (req: Request, res: Response) => {
     if (clientEmail !== undefined) project.clientEmail = clientEmail;
     if (clientPhone !== undefined) project.clientPhone = clientPhone;
     if (clientCompany !== undefined) project.clientCompany = clientCompany;
+    if (publicUrl !== undefined) project.publicUrl = publicUrl;
     if (status) project.status = status;
     if (priority) project.priority = priority;
     if (projectType) project.projectType = projectType;
@@ -720,7 +722,7 @@ export const getAllProjectsStatus = async (req: Request, res: Response) => {
 export const getPublishedProjects = async (_req: Request, res: Response) => {
   try {
     const projects = await Project.find({ published: true, status: { $ne: "on-hold" } })
-      .select("name description client progress status projectType expectedCompletionDate published")
+      .select("name description client publicUrl progress status projectType expectedCompletionDate published")
       .sort({ updatedAt: -1 })
       .limit(12);
 

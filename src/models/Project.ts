@@ -64,6 +64,7 @@ export interface IProject extends Document {
   clientEmail: string;
   clientPhone: string;
   clientCompany: string;
+  publicUrl: string;
   status: 'pending' | 'in-progress' | 'completed' | 'on-hold';
   priority: 'low' | 'medium' | 'high';
   projectType: 'erp' | 'static' | 'dynamic' | 'apps' | 'ecommerce' | 'other';
@@ -153,6 +154,7 @@ const projectSchema = new Schema<IProject>(
     clientEmail: { type: String, default: "" },
     clientPhone: { type: String, default: "" },
     clientCompany: { type: String, default: "" },
+    publicUrl: { type: String, default: "", trim: true },
     
     status: { 
       type: String, 

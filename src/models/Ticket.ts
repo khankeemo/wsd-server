@@ -1,10 +1,14 @@
 import mongoose, { Schema, Document } from "mongoose";
 
 export interface ITicket extends Document {
-  clientId: mongoose.Types.ObjectId;
+  clientId?: mongoose.Types.ObjectId | null;
   adminId?: mongoose.Types.ObjectId | null;
   developerId?: mongoose.Types.ObjectId | null;
   projectId?: mongoose.Types.ObjectId | null;
+  source: "client_portal" | "public_contact";
+  contactName?: string;
+  contactEmail?: string;
+  contactCompany?: string;
   subject: string;
   description: string;
   priority: "low" | "medium" | "high";
@@ -27,10 +31,18 @@ export interface ITicket extends Document {
 
 const ticketSchema = new Schema<ITicket>(
   {
-    clientId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    clientId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     adminId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     developerId: { type: Schema.Types.ObjectId, ref: "User", default: null },
     projectId: { type: Schema.Types.ObjectId, ref: "Project", default: null },
+    source: {
+      type: String,
+      enum: ["client_portal", "public_contact"],
+      default: "client_portal",
+    },
+    contactName: { type: String, trim: true, default: "" },
+    contactEmail: { type: String, trim: true, lowercase: true, default: "" },
+    contactCompany: { type: String, trim: true, default: "" },
     subject: { type: String, required: true, trim: true },
     description: { type: String, required: true, trim: true },
     priority: {

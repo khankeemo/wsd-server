@@ -20,6 +20,7 @@ const buildUserResponse = (user: any) => ({
   phone: user.phone || "",
   company: user.company || "",
   role: user.role || "client",
+  adminLevel: user.role === "admin" ? user.adminLevel || "super" : null,
   avatar: user.avatar || "",
   customId: user.customId || "",
   published: user.published || false,

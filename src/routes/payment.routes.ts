@@ -26,6 +26,9 @@ router.get('/', getPayments);
 // GET /api/payments/stats - Get payment statistics
 router.get('/stats', getPaymentStats);
 
+// POST /api/payments/verify - Verify payment
+router.post('/verify', verifyPayment);
+
 // GET /api/payments/status/:status - Get payments by status
 router.get('/status/:status', async (req, res) => {
   const user = (req as any).user;
@@ -66,8 +69,5 @@ router.post('/:id/refund', refundPayment);
 router.get('/:id/receipt', (req, res) => {
   res.status(200).json({ success: true, message: 'Receipt download endpoint' });
 });
-
-// POST /api/payments/verify - Verify payment
-router.post('/verify', verifyPayment);
 
 export default router;
