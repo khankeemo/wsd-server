@@ -35,6 +35,9 @@ const isAllowedOrigin = (origin: string) => {
 
   try {
     const { hostname } = new URL(origin);
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      return true;
+    }
     return hostname.endsWith(".vercel.app");
   } catch {
     return false;

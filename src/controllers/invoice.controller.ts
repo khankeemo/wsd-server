@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Invoice from "../models/Invoice";
 import { Project } from "../models/Project";
 import User from "../models/User";
+import Notification from "../models/Notification";
 
 const getInvoiceScope = (req: Request) => {
   const user = (req as any).user;
@@ -58,6 +59,15 @@ const hydrateInvoicePayload = async (payload: any) => {
     hydrated.clientAddress = hydrated.clientAddress || client.company || "";
   }
 
+  if (!hydrated.clientId && hydrated.clientEmail) {
+    const email = String(hydrated.clientEmail).toLowerCase().trim();
+    const clientUser = await User.findOne({ email, role: "client" });
+    if (clientUser) {
+      hydrated.clientId = clientUser._id;
+      hydrated.clientName = hydrated.clientName || clientUser.name;
+    }
+  }
+
   if (!hydrated.clientName || !hydrated.clientEmail) {
     throw new Error("Client name and email are required");
   }
@@ -111,6 +121,34 @@ export const createInvoice = async (req: Request, res: Response) => {
       invoiceNumber: payload.invoiceNumber || buildInvoiceNumber(),
       amount: calculateAmount(payload.items, payload.tax, payload.discount),
     });
+
+    if (invoice.clientId) {
+      try {
+        const dueStr = new Date(invoice.dueDate).toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+        const amt = Number(invoice.amount).toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+        await Notification.create({
+          recipientId: invoice.clientId,
+          senderId: userId,
+          type: "invoice_created",
+          message: `New invoice ${invoice.invoiceNumber} for $${amt}. Due ${dueStr}.`,
+          isRead: false,
+          metadata: {
+            invoiceId: String(invoice._id),
+            invoiceNumber: invoice.invoiceNumber,
+            amount: invoice.amount,
+          },
+        });
+      } catch (notifyErr) {
+        console.error("Invoice notification error:", notifyErr);
+      }
+    }
 
     res.status(201).json({ success: true, data: invoice });
   } catch (error) {
@@ -182,13 +220,33 @@ export const getInvoiceStats = async (req: Request, res: Response) => {
     if (!scope) return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const invoices = await Invoice.find(scope);
+    const isOverdue = (inv: (typeof invoices)[0]) => {
+      if (inv.status === "paid") return false;
+      if (inv.status === "overdue") return true;
+      const due = new Date(inv.dueDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      due.setHours(0, 0, 0, 0);
+      return due < today && (inv.status === "pending" || inv.status === "draft");
+    };
+    const isPendingDisplay = (inv: (typeof invoices)[0]) => {
+      if (inv.status === "paid" || inv.status === "overdue") return false;
+      if (isOverdue(inv)) return false;
+      return inv.status === "pending" || inv.status === "draft";
+    };
+    let pending = 0;
+    let overdue = 0;
+    for (const inv of invoices) {
+      if (isOverdue(inv)) overdue++;
+      else if (isPendingDisplay(inv)) pending++;
+    }
     res.json({
       success: true,
       data: {
         total: invoices.length,
         paid: invoices.filter((invoice) => invoice.status === "paid").length,
-        pending: invoices.filter((invoice) => invoice.status === "pending").length,
-        overdue: invoices.filter((invoice) => invoice.status === "overdue").length,
+        pending,
+        overdue,
         totalAmount: invoices.reduce((sum, invoice) => sum + invoice.amount, 0),
       },
     });

@@ -16,6 +16,7 @@ export interface INotification extends Document {
     | "project_assignment_assigned"
     | "project_assignment_unassigned"
     | "deadline_approaching"
+    | "invoice_created"
     | "other";
   message: string;
   isRead: boolean;
@@ -43,6 +44,7 @@ const NotificationSchema = new Schema<INotification>(
         "project_assignment_assigned",
         "project_assignment_unassigned",
         "deadline_approaching",
+        "invoice_created",
         "other",
       ], 
       default: 'other' 
