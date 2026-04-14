@@ -6,6 +6,7 @@ import { authMiddleware } from '../middleware/auth.middleware';
 import {
   createPayment,
   deletePayment,
+  downloadPaymentReceipt,
   getPaymentById,
   getPaymentStats,
   getPayments,
@@ -66,8 +67,6 @@ router.delete('/:id', deletePayment);
 router.post('/:id/refund', refundPayment);
 
 // GET /api/payments/:id/receipt - Download receipt
-router.get('/:id/receipt', (req, res) => {
-  res.status(200).json({ success: true, message: 'Receipt download endpoint' });
-});
+router.get('/:id/receipt', downloadPaymentReceipt);
 
 export default router;

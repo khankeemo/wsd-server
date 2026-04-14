@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import Payment from "../models/Payment";
 import Invoice from "../models/Invoice";
+import PDFDocument from "pdfkit";
 
 const getPaymentScope = (req: Request) => {
   const user = (req as any).user;
@@ -172,6 +173,70 @@ export const verifyPayment = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Verify payment error:", error);
     res.status(500).json({ success: false, message: "Failed to verify payment" });
+  }
+};
+
+export const downloadPaymentReceipt = async (req: Request, res: Response) => {
+  try {
+    const scope = getPaymentScope(req);
+    if (!scope) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const payment = await Payment.findOne({ _id: req.params.id, ...scope });
+    if (!payment) return res.status(404).json({ success: false, message: "Payment not found" });
+
+    const doc = new PDFDocument({ margin: 50 });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=receipt-${payment.invoiceNumber}.pdf`);
+    doc.pipe(res);
+
+    doc.fontSize(24).font("Helvetica-Bold").text("Payment Receipt", { align: "center" });
+    doc.moveDown(1);
+
+    doc.fontSize(12).font("Helvetica");
+    doc.text(`Receipt ID: ${payment._id}`, { align: "right" });
+    doc.text(`Invoice Number: ${payment.invoiceNumber}`, { align: "right" });
+    doc.text(`Transaction ID: ${payment.transactionId}`, { align: "right" });
+    doc.text(`Payment Date: ${new Date(payment.date).toLocaleDateString()}`, { align: "right" });
+    doc.text(`Status: ${payment.status.toUpperCase()}`, { align: "right" });
+    doc.moveDown(1);
+
+    doc.fontSize(16).font("Helvetica-Bold").text("Paid By");
+    doc.moveDown(0.4);
+    doc.fontSize(12).font("Helvetica");
+    doc.text(payment.clientName);
+    doc.text(payment.clientEmail);
+
+    if (payment.notes) {
+      doc.moveDown(1);
+      doc.fontSize(14).font("Helvetica-Bold").text("Notes");
+      doc.moveDown(0.3);
+      doc.fontSize(12).font("Helvetica").text(payment.notes);
+    }
+
+    doc.moveDown(1);
+    doc.fontSize(16).font("Helvetica-Bold").text("Amount Paid");
+    doc.moveDown(0.3);
+    doc.fontSize(20).fillColor("#007AFF").text(`$${payment.amount.toFixed(2)}`);
+    doc.fillColor("black");
+
+    if (payment.invoiceId) {
+      const invoice = await Invoice.findById(payment.invoiceId);
+      if (invoice) {
+        doc.moveDown(1);
+        doc.fontSize(12).font("Helvetica-Bold").text("Invoice Summary");
+        doc.moveDown(0.3);
+        doc.fontSize(12).font("Helvetica");
+        doc.text(`Invoice Status: ${invoice.status}`);
+        doc.text(`Due Date: ${new Date(invoice.dueDate).toLocaleDateString()}`);
+      }
+    }
+
+    doc.moveDown(2);
+    doc.fontSize(10).font("Helvetica").text("Thank you for your payment.", { align: "center" });
+    doc.end();
+  } catch (error) {
+    console.error("Download payment receipt error:", error);
+    res.status(500).json({ success: false, message: "Failed to generate payment receipt" });
   }
 };
 
