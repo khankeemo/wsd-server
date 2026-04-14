@@ -31,7 +31,12 @@ export const getDashboardStats = async (req: Request, res: Response) => {
     let totalDevelopers = 0;
     let completedTasks = 0;
     let activeProjects = 0;
-    let recentActivity: Array<{ id: string; type: string; title: string; timestamp: Date }> = [];
+    let recentActivity: Array<{ id: string; type: string; title: string; timestamp: Date | null }> = [];
+
+    const safeTimestamp = (timestamp: Date | string | null | undefined) => {
+      if (!timestamp) return 0;
+      return new Date(timestamp).getTime() || 0;
+    };
 
     if (user.role === "admin") {
       totalProjects = await Project.countDocuments({ userId });
@@ -52,7 +57,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         ...tasks.map((task) => ({ id: String(task._id), type: "task", title: `Task completed: ${task.title}`, timestamp: task.updatedAt })),
         ...clients.map((client) => ({ id: String(client._id), type: "client", title: `Client added: ${client.name}`, timestamp: client.createdAt })),
       ]
-        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+        .sort((a, b) => safeTimestamp(b.timestamp) - safeTimestamp(a.timestamp))
         .slice(0, 8);
     } else if (user.role === "client") {
       totalProjects = await Project.countDocuments({ clientId: userId });
@@ -72,7 +77,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         ...tasks.map((task) => ({ id: String(task._id), type: "task", title: `Task completed: ${task.title}`, timestamp: task.updatedAt })),
         ...tickets.map((ticket) => ({ id: String(ticket._id), type: "query", title: `Query ${ticket.subject} is ${ticket.status}`, timestamp: ticket.updatedAt })),
       ]
-        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+        .sort((a, b) => safeTimestamp(b.timestamp) - safeTimestamp(a.timestamp))
         .slice(0, 8);
 
       const now = new Date();
@@ -130,7 +135,7 @@ export const getDashboardStats = async (req: Request, res: Response) => {
         ...tasks.map((task) => ({ id: String(task._id), type: "task", title: `Task ${task.title} is ${task.status}`, timestamp: task.updatedAt })),
         ...tickets.map((ticket) => ({ id: String(ticket._id), type: "query", title: `Query ${ticket.subject} is ${ticket.status}`, timestamp: ticket.updatedAt })),
       ]
-        .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+        .sort((a, b) => safeTimestamp(b.timestamp) - safeTimestamp(a.timestamp))
         .slice(0, 8);
     }
 

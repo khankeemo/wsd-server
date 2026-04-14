@@ -280,7 +280,7 @@ export const downloadInvoicePDF = async (req: Request, res: Response) => {
     doc.moveDown(0.5);
     
     // Invoice details
-    doc.fontSize(12).font("Helvetica-Normal");
+    doc.fontSize(12).font("Helvetica");
     doc.text(`Invoice Number: ${invoice.invoiceNumber}`, { align: "right" });
     doc.text(`Issue Date: ${new Date(invoice.issueDate).toLocaleDateString()}`, { align: "right" });
     doc.text(`Due Date: ${new Date(invoice.dueDate).toLocaleDateString()}`, { align: "right" });
@@ -290,7 +290,7 @@ export const downloadInvoicePDF = async (req: Request, res: Response) => {
     // Client information
     doc.fontSize(16).font("Helvetica-Bold").text("Bill To:", { underline: true });
     doc.moveDown(0.3);
-    doc.fontSize(12).font("Helvetica-Normal");
+    doc.fontSize(12).font("Helvetica");
     doc.text(invoice.clientName);
     doc.text(invoice.clientEmail);
     if (invoice.clientAddress) {
@@ -317,7 +317,7 @@ export const downloadInvoicePDF = async (req: Request, res: Response) => {
     doc.moveDown(0.5);
 
     // Items
-    doc.fontSize(11).font("Helvetica-Normal");
+    doc.fontSize(11).font("Helvetica");
     let currentY = doc.y;
     invoice.items.forEach((item, index) => {
       doc.text(item.description, descX, currentY, { width: 150 });
@@ -365,7 +365,7 @@ export const downloadInvoicePDF = async (req: Request, res: Response) => {
       doc.moveDown(2);
       doc.fontSize(12).font("Helvetica-Bold").text("Notes:", { underline: true });
       doc.moveDown(0.3);
-      doc.fontSize(11).font("Helvetica-Normal").text(invoice.notes);
+      doc.fontSize(11).font("Helvetica").text(invoice.notes);
     }
 
     // Footer
