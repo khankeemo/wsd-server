@@ -5,6 +5,7 @@ import path from "path";
 
 import routes from "./routes";
 import { connectDB } from "./config/dbConnection";
+import { cleanupArchivedTickets } from "./controllers/ticket.controller";
 
 dotenv.config({ quiet: true });
 
@@ -73,5 +74,16 @@ app.use("/api", routes);
 
 // Serve frontend build
 app.use(express.static(path.join(__dirname, "../client")));
+
+const runTicketCleanup = async () => {
+  try {
+    await cleanupArchivedTickets();
+  } catch (error) {
+    console.error("Ticket cleanup failed", error);
+  }
+};
+
+runTicketCleanup();
+setInterval(runTicketCleanup, 6 * 60 * 60 * 1000);
 
 export default app;

@@ -65,6 +65,7 @@ export interface IProject extends Document {
   clientPhone: string;
   clientCompany: string;
   publicUrl: string;
+  previewImage: string;
   status: 'pending' | 'in-progress' | 'completed' | 'on-hold';
   priority: 'low' | 'medium' | 'high';
   projectType: 'erp' | 'static' | 'dynamic' | 'apps' | 'ecommerce' | 'other';
@@ -84,6 +85,7 @@ export interface IProject extends Document {
   published?: boolean;
   createdAt: Date;
   updatedAt: Date;
+  completedAt?: Date | null;
   // Virtuals
   daysRemaining: number | null;
   projectTypeDisplay: string;
@@ -155,6 +157,7 @@ const projectSchema = new Schema<IProject>(
     clientPhone: { type: String, default: "" },
     clientCompany: { type: String, default: "" },
     publicUrl: { type: String, default: "", trim: true },
+    previewImage: { type: String, default: "", trim: true },
     
     status: { 
       type: String, 
@@ -196,6 +199,7 @@ const projectSchema = new Schema<IProject>(
     statusUpdates: [statusUpdateSchema],
     sharedFiles: { type: [sharedFileSchema], default: [] },
     published: { type: Boolean, default: false },
+    completedAt: { type: Date, default: null },
   },
   {
     timestamps: true,

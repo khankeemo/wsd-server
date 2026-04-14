@@ -10,6 +10,7 @@ import { Project } from "../models/Project";
 import { Task } from "../models/Task";
 import User from "../models/User";
 import { sendEmail, escapeHtml, isEmailConfigured } from "../services/email.service";
+import { isValidEmail, isValidPhone } from "../utils/validation";
 
 // Helper to get userId from request
 const getUserId = (req: Request): string | undefined => {
@@ -123,6 +124,14 @@ export const createClient = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Missing required fields: name, email" });
     }
 
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ message: "Please enter a valid email address" });
+    }
+
+    if (phone && !isValidPhone(phone)) {
+      return res.status(400).json({ message: "Please enter a valid phone number" });
+    }
+
     if (!isEmailConfigured()) {
       return res.status(500).json({
         message:
@@ -202,6 +211,7 @@ export const createClient = async (req: Request, res: Response) => {
       published,
     });
 
+    const loginUrl = `${(process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "")}/login`;
     const emailSubject = "Your Websmith Client Account Credentials";
     const emailText = `
       Welcome to Websmith, ${name}!
@@ -211,7 +221,7 @@ export const createClient = async (req: Request, res: Response) => {
       Client ID: ${customId}
       Temporary Password: ${tempPassword}
       
-      Log in here: ${process.env.FRONTEND_URL || "http://localhost:3000"}/login
+      Log in here: ${loginUrl}
       
       Note: You will be required to change your password upon your first login.
     `;
@@ -225,7 +235,7 @@ export const createClient = async (req: Request, res: Response) => {
           <p style="margin: 0;"><strong>Temporary Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 4px; border-radius: 4px;">${tempPassword}</code></p>
         </div>
         <p>Please log in through our portal:</p>
-        <a href="${process.env.FRONTEND_URL || "http://localhost:3000"}/login" style="display: inline-block; background-color: #007AFF; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Log In to Dashboard</a>
+        <a href="${loginUrl}" style="display: inline-block; background-color: #007AFF; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Log In to Dashboard</a>
         <p style="margin-top: 20px; font-size: 14px; color: #8E8E93;">Note: For security reasons, you will be required to change this temporary password upon your first login.</p>
       </div>
     `;
@@ -267,6 +277,14 @@ export const updateClient = async (req: Request, res: Response) => {
 
     if (!name || !email) {
       return res.status(400).json({ message: "Missing required fields: name, email" });
+    }
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ message: "Please enter a valid email address" });
+    }
+
+    if (phone && !isValidPhone(phone)) {
+      return res.status(400).json({ message: "Please enter a valid phone number" });
     }
 
     const duplicateClient = await Client.findOne({

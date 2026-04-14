@@ -6,6 +6,7 @@
 import { Request, Response } from "express";
 import { Project } from "../models/Project";
 import { Task } from "../models/Task";
+import Ticket from "../models/Ticket";
 import User from "../models/User";
 import Notification from "../models/Notification";
 
@@ -55,6 +56,18 @@ const mapProjectResponse = (project: any) => ({
   clientUserEmail: project.clientId?.email || project.clientEmail,
   published: Boolean(project.published),
 });
+
+const resolveClientUser = async (body: Record<string, any>) => {
+  if (body.clientId) {
+    return User.findOne({ _id: body.clientId, role: "client" });
+  }
+
+  if (body.customClientId) {
+    return User.findOne({ customId: body.customClientId, role: "client" });
+  }
+
+  return null;
+};
 
 const sanitizeSharedFiles = (value: unknown, userId: string) => {
   if (!Array.isArray(value)) {
@@ -156,7 +169,7 @@ export const getProjectById = async (req: Request, res: Response) => {
 export const createProject = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
-    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, publicUrl, published } = req.body;
+    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, publicUrl, published, previewImage } = req.body;
     const role = (req as any).user?.role;
 
     if (!userId) {
@@ -168,28 +181,28 @@ export const createProject = async (req: Request, res: Response) => {
     }
 
     // Validate required fields
-    if (!name || !description || !client || !startDate || !customClientId) {
-      return res.status(400).json({ message: "Missing required fields: name, description, client, startDate, customClientId" });
+    if (!name || !description || !startDate) {
+      return res.status(400).json({ message: "Missing required fields: name, description, and startDate" });
     }
 
-    // Lookup client by customClientId
-    const clientUser = await User.findOne({ customId: customClientId, role: 'client' });
+    const clientUser = await resolveClientUser(req.body);
     if (!clientUser) {
-      return res.status(404).json({ message: `Client with ID "${customClientId}" not found. Project cannot be created.` });
+      return res.status(404).json({ message: "Selected client was not found. Project cannot be created." });
     }
 
     const project = await Project.create({
       userId,
       clientId: clientUser._id,
-      customClientId,
+      customClientId: clientUser.customId || customClientId || "",
       assignedDevId: assignedDevId || null,
       name,
       description,
-      client,
+      client: client || clientUser.name,
       clientEmail: clientEmail || clientUser.email,
       clientPhone: clientPhone || clientUser.phone || "",
       clientCompany: clientCompany || clientUser.company || "",
       publicUrl: publicUrl || "",
+      previewImage: previewImage || "",
       status: status || "pending",
       priority: priority || "medium",
       projectType: projectType || "other",
@@ -204,6 +217,7 @@ export const createProject = async (req: Request, res: Response) => {
       activityLog: [{ action: "Project created", user: userId, timestamp: new Date() }],
       sharedFiles: sanitizeSharedFiles(req.body.sharedFiles, userId),
       published: Boolean(published),
+      completedAt: status === "completed" ? new Date() : null,
       statusUpdates: [{
         status: status || "pending",
         progress: 0,
@@ -229,7 +243,7 @@ export const updateProject = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, publicUrl, published } = req.body;
+    const { name, description, client, assignedDevId, status, priority, startDate, endDate, budget, projectType, clientEmail, clientPhone, clientCompany, customClientId, publicUrl, published, previewImage } = req.body;
     const role = (req as any).user?.role;
 
     if (!userId) {
@@ -251,13 +265,17 @@ export const updateProject = async (req: Request, res: Response) => {
     if (description) project.description = description;
     if (client) project.client = client;
     
-    if (customClientId && customClientId !== project.customClientId) {
-      const clientUser = await User.findOne({ customId: customClientId, role: 'client' });
+    if (req.body.clientId || customClientId) {
+      const clientUser = await resolveClientUser(req.body);
       if (!clientUser) {
-        return res.status(404).json({ message: `Client with ID "${customClientId}" not found.` });
+        return res.status(404).json({ message: "Selected client was not found." });
       }
-      project.customClientId = customClientId;
+      project.customClientId = clientUser.customId || customClientId || "";
       project.clientId = clientUser._id;
+      project.client = client || clientUser.name;
+      project.clientEmail = clientEmail || clientUser.email;
+      project.clientPhone = clientPhone || clientUser.phone || "";
+      project.clientCompany = clientCompany || clientUser.company || "";
     }
 
     const previousAssignedDevId = project.assignedDevId ? String(project.assignedDevId) : "";
@@ -268,6 +286,7 @@ export const updateProject = async (req: Request, res: Response) => {
     if (clientPhone !== undefined) project.clientPhone = clientPhone;
     if (clientCompany !== undefined) project.clientCompany = clientCompany;
     if (publicUrl !== undefined) project.publicUrl = publicUrl;
+    if (previewImage !== undefined) project.previewImage = previewImage;
     if (status) project.status = status;
     if (priority) project.priority = priority;
     if (projectType) project.projectType = projectType;
@@ -278,6 +297,12 @@ export const updateProject = async (req: Request, res: Response) => {
     }
     if (budget !== undefined) project.budget = budget;
     if (published !== undefined) project.published = Boolean(published);
+    if (project.status === "completed" && !project.completedAt) {
+      project.completedAt = new Date();
+    }
+    if (project.status !== "completed") {
+      project.completedAt = null;
+    }
     if (req.body.sharedFiles !== undefined) {
       project.sharedFiles = sanitizeSharedFiles(req.body.sharedFiles, userId) as any;
     }
@@ -289,6 +314,19 @@ export const updateProject = async (req: Request, res: Response) => {
     });
 
     await project.save();
+
+    if (project.status === "completed" && project.completedAt) {
+      await Ticket.updateMany(
+        { projectId: project._id },
+        {
+          $set: {
+            archiveAfter: new Date(project.completedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+          },
+        }
+      );
+    } else {
+      await Ticket.updateMany({ projectId: project._id }, { $set: { archiveAfter: null } });
+    }
 
     await project.populate("clientId", "name email");
     await project.populate("assignedDevId", "name email");
@@ -553,6 +591,8 @@ export const updateProjectStatus = async (req: Request, res: Response) => {
       project.progress = 25;
     }
 
+    project.completedAt = project.status === "completed" ? project.completedAt || new Date() : null;
+
     project.statusUpdates.push({
       status: project.status,
       progress: project.progress,
@@ -568,6 +608,19 @@ export const updateProjectStatus = async (req: Request, res: Response) => {
     });
 
     await project.save();
+
+    if (project.status === "completed" && project.completedAt) {
+      await Ticket.updateMany(
+        { projectId: project._id },
+        {
+          $set: {
+            archiveAfter: new Date(project.completedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+          },
+        }
+      );
+    } else {
+      await Ticket.updateMany({ projectId: project._id }, { $set: { archiveAfter: null } });
+    }
 
     const recipients = [project.clientId, project.assignedDevId].filter(Boolean);
     if (recipients.length > 0) {
@@ -722,7 +775,7 @@ export const getAllProjectsStatus = async (req: Request, res: Response) => {
 export const getPublishedProjects = async (_req: Request, res: Response) => {
   try {
     const projects = await Project.find({ published: true, status: { $ne: "on-hold" } })
-      .select("name description client publicUrl progress status projectType expectedCompletionDate published")
+      .select("name description client publicUrl previewImage progress status projectType expectedCompletionDate published")
       .sort({ updatedAt: -1 })
       .limit(12);
 

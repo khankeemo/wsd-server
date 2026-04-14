@@ -34,7 +34,6 @@ export const getServices = async (_req: Request, res: Response) => {
         id: service._id,
         name: service.name,
         description: service.description,
-        price: service.price,
       })),
     });
   } catch (error) {

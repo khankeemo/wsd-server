@@ -11,6 +11,12 @@ import { Task } from "../models/Task";
 import User from "../models/User";
 import Notification from "../models/Notification";
 import { sendEmail, isEmailConfigured, escapeHtml } from "../services/email.service";
+import {
+  getPasswordValidationMessage,
+  isStrongPassword,
+  isValidEmail,
+  isValidPhone,
+} from "../utils/validation";
 
 const buildUserResponse = (user: any) => ({
   id: user._id,
@@ -59,6 +65,14 @@ const normalizeManagedUserPayload = (body: Record<string, unknown>) => ({
   phone: String(body.phone || '').trim(),
   company: String(body.company || '').trim(),
 });
+
+const normalizeSkills = (value: unknown) =>
+  Array.isArray(value)
+    ? value
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .slice(0, 20)
+    : [];
 
 export class UserController {
   async getCurrentUser(req: Request, res: Response): Promise<void> {
@@ -110,6 +124,16 @@ export class UserController {
         return;
       }
 
+      if (name !== undefined && !String(name).trim()) {
+        res.status(400).json({ success: false, message: "Name is required" });
+        return;
+      }
+
+      if (phone !== undefined && !isValidPhone(phone)) {
+        res.status(400).json({ success: false, message: "Please enter a valid phone number" });
+        return;
+      }
+
       const mergedPreferences =
         preferences !== undefined
           ? {
@@ -139,7 +163,10 @@ export class UserController {
           ...(avatar !== undefined ? { avatar } : {}),
           ...(headline !== undefined ? { headline } : {}),
           ...(bio !== undefined ? { bio } : {}),
-          ...(skills !== undefined ? { skills } : {}),
+          ...(skills !== undefined ? { skills: normalizeSkills(skills) } : {}),
+          ...(req.body.experienceYears !== undefined
+            ? { experienceYears: Number(req.body.experienceYears) || 0 }
+            : {}),
           updatedAt: new Date(),
         },
         { new: true, runValidators: true }
@@ -171,8 +198,8 @@ export class UserController {
         return;
       }
 
-      if (newPassword.length < 6) {
-        res.status(400).json({ success: false, message: "New password must be at least 6 characters" });
+      if (!isStrongPassword(newPassword)) {
+        res.status(400).json({ success: false, message: getPasswordValidationMessage() });
         return;
       }
 
@@ -241,6 +268,16 @@ export class UserController {
         return;
       }
 
+      if (!isValidEmail(email)) {
+        res.status(400).json({ success: false, message: "Please enter a valid email address" });
+        return;
+      }
+
+      if (phone && !isValidPhone(phone)) {
+        res.status(400).json({ success: false, message: "Please enter a valid phone number" });
+        return;
+      }
+
       const existing = await User.findOne({ email: String(email).toLowerCase() });
       if (existing) {
         res.status(409).json({ success: false, message: "A user with this email already exists" });
@@ -258,7 +295,7 @@ export class UserController {
         customId: await developerCustomId(),
         isTemporaryPassword: true,
         setupCompleted: false,
-        skills,
+        skills: normalizeSkills(skills),
         headline,
         bio,
         experienceYears: Number(experienceYears) || 0,
@@ -290,6 +327,16 @@ export class UserController {
   async updateDeveloper(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
+      if (req.body.email !== undefined && !isValidEmail(req.body.email)) {
+        res.status(400).json({ success: false, message: "Please enter a valid email address" });
+        return;
+      }
+
+      if (req.body.phone !== undefined && !isValidPhone(req.body.phone)) {
+        res.status(400).json({ success: false, message: "Please enter a valid phone number" });
+        return;
+      }
+
       const updated = await User.findOneAndUpdate(
         { _id: id, role: "developer" },
         {
@@ -297,7 +344,7 @@ export class UserController {
           ...(req.body.email !== undefined ? { email: String(req.body.email).toLowerCase() } : {}),
           ...(req.body.phone !== undefined ? { phone: req.body.phone } : {}),
           ...(req.body.company !== undefined ? { company: req.body.company } : {}),
-          ...(req.body.skills !== undefined ? { skills: req.body.skills } : {}),
+          ...(req.body.skills !== undefined ? { skills: normalizeSkills(req.body.skills) } : {}),
           ...(req.body.headline !== undefined ? { headline: req.body.headline } : {}),
           ...(req.body.bio !== undefined ? { bio: req.body.bio } : {}),
           ...(req.body.experienceYears !== undefined ? { experienceYears: Number(req.body.experienceYears) || 0 } : {}),
@@ -448,6 +495,16 @@ export class UserController {
 
       if (!name || !email) {
         res.status(400).json({ success: false, message: 'Missing required fields: name, email' });
+        return;
+      }
+
+      if (!isValidEmail(email)) {
+        res.status(400).json({ success: false, message: 'Please enter a valid email address' });
+        return;
+      }
+
+      if (phone && !isValidPhone(phone)) {
+        res.status(400).json({ success: false, message: 'Please enter a valid phone number' });
         return;
       }
 

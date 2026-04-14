@@ -3,11 +3,6 @@ import mongoose from "mongoose";
 import { Service } from "../models/Service";
 
 const normalizeServicePayload = (body: Record<string, unknown>) => {
-  const parsedPrice =
-    body.price === undefined || body.price === null || body.price === ""
-      ? null
-      : Number(body.price);
-
   const rawIsActive = body.isActive;
   const isActive =
     rawIsActive === false ||
@@ -20,7 +15,6 @@ const normalizeServicePayload = (body: Record<string, unknown>) => {
   return {
     name: String(body.name || "").trim(),
     description: String(body.description || "").trim(),
-    price: parsedPrice,
     isActive,
   };
 };
@@ -55,20 +49,15 @@ export const getAllServices = async (_req: Request, res: Response) => {
 
 export const createService = async (req: Request, res: Response) => {
   try {
-    const { name, description, price, isActive } = normalizeServicePayload(req.body);
+    const { name, description, isActive } = normalizeServicePayload(req.body);
 
     if (!name || !description) {
       return res.status(400).json({ success: false, message: "Name and description are required" });
     }
 
-    if (price !== null && (!Number.isFinite(price) || price < 0)) {
-      return res.status(400).json({ success: false, message: "Price must be a valid positive number" });
-    }
-
     const service = await Service.create({
       name,
       description,
-      price,
       isActive,
     });
 
@@ -86,14 +75,10 @@ export const updateService = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "Invalid service id" });
     }
 
-    const { name, description, price, isActive } = normalizeServicePayload(req.body);
+    const { name, description, isActive } = normalizeServicePayload(req.body);
 
     if (!name || !description) {
       return res.status(400).json({ success: false, message: "Name and description are required" });
-    }
-
-    if (price !== null && (!Number.isFinite(price) || price < 0)) {
-      return res.status(400).json({ success: false, message: "Price must be a valid positive number" });
     }
 
     const service = await Service.findById(id);
@@ -104,7 +89,6 @@ export const updateService = async (req: Request, res: Response) => {
 
     service.name = name;
     service.description = description;
-    service.price = price;
     service.isActive = isActive;
 
     await service.save();

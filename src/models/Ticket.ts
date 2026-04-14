@@ -12,8 +12,11 @@ export interface ITicket extends Document {
   subject: string;
   description: string;
   priority: "low" | "medium" | "high";
-  status: "open" | "in_progress" | "resolved";
+  status: "open" | "in_progress" | "resolved" | "closed";
+  chatStatus?: "open" | "closed";
   resolution?: string;
+  closedAt?: Date | null;
+  archiveAfter?: Date | null;
   attachments: Array<{
     name: string;
     url: string;
@@ -52,10 +55,18 @@ const ticketSchema = new Schema<ITicket>(
     },
     status: {
       type: String,
-      enum: ["open", "in_progress", "resolved"],
+      enum: ["open", "in_progress", "resolved", "closed"],
       default: "open",
     },
+    chatStatus: {
+      type: String,
+      enum: ["open", "closed"],
+      default: "open",
+      index: true,
+    },
     resolution: { type: String, default: "" },
+    closedAt: { type: Date, default: null },
+    archiveAfter: { type: Date, default: null, index: true },
     attachments: {
       type: [
         new Schema(

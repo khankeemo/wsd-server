@@ -12,6 +12,7 @@ const isQueryNotificationEnabled = async (recipientId: any) => {
 };
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CLOSED_STATUSES = new Set(["resolved", "closed"]);
 
 const getTicketScope = (req: Request) => {
   const user = (req as any).user;
@@ -178,7 +179,13 @@ export const getTickets = async (req: Request, res: Response) => {
       .populate("projectId", "name status")
       .sort({ createdAt: -1 });
 
-    res.json({ success: true, data: tickets });
+    res.json({
+      success: true,
+      data: tickets.map((ticket: any) => ({
+        ...ticket.toObject(),
+        chatStatus: ticket.chatStatus || (CLOSED_STATUSES.has(ticket.status) ? "closed" : "open"),
+      })),
+    });
   } catch (error) {
     console.error("Get tickets error:", error);
     res.status(500).json({ success: false, message: "Failed to fetch tickets" });
@@ -216,16 +223,25 @@ export const updateTicketStatus = async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, message: "Clients can only reopen their own queries" });
     }
 
-    if (!["open", "in_progress", "resolved"].includes(status)) {
+    if (!["open", "in_progress", "resolved", "closed"].includes(status)) {
       return res.status(400).json({ success: false, message: "Invalid ticket status" });
     }
 
     ticket.status = status;
+    ticket.chatStatus = CLOSED_STATUSES.has(status) ? "closed" : "open";
+    ticket.closedAt = ticket.chatStatus === "closed" ? new Date() : null;
     if (resolution !== undefined) {
       ticket.resolution = resolution;
     }
     ticket.history.push({
-      action: status === "resolved" ? "resolved" : status === "open" ? "reopened" : "updated",
+      action:
+        status === "resolved"
+          ? "resolved"
+          : status === "closed"
+            ? "closed"
+            : status === "open"
+              ? "reopened"
+              : "updated",
       actorId: userId,
       actorRole: user.role,
       message: resolution || reopenMessage || `Status changed to ${status}`,
@@ -321,6 +337,10 @@ export const addTicketReply = async (req: Request, res: Response) => {
     const ticket = await Ticket.findOne(scope);
     if (!ticket) {
       return res.status(404).json({ success: false, message: "Ticket not found" });
+    }
+
+    if ((ticket.chatStatus || (CLOSED_STATUSES.has(ticket.status) ? "closed" : "open")) === "closed") {
+      return res.status(400).json({ success: false, message: "Closed queries are read-only" });
     }
 
     ticket.history.push({
@@ -448,6 +468,8 @@ export const bulkUpdateTicketStatus = async (req: Request, res: Response) => {
       if (!ticket) continue;
 
       ticket.status = update.status;
+      ticket.chatStatus = CLOSED_STATUSES.has(update.status) ? "closed" : "open";
+      ticket.closedAt = ticket.chatStatus === "closed" ? new Date() : null;
       ticket.history.push({
         action: "updated",
         actorId: userId,
@@ -517,4 +539,45 @@ export const sendResolutionEmail = async (req: Request, res: Response) => {
     console.error("Send resolution email error:", error);
     res.status(500).json({ success: false, message: "Failed to send resolution email" });
   }
+};
+
+export const cleanupArchivedTickets = async () => {
+  const projects = await Project.find({
+    completedAt: { $ne: null, $lte: new Date() },
+  }).select("_id completedAt");
+
+  if (!projects.length) {
+    return { projectCount: 0, deletedCount: 0 };
+  }
+
+  const archiveTargets = projects
+    .filter((project: any) => project.completedAt)
+    .map((project: any) => ({
+      projectId: project._id,
+      archiveAfter: new Date(new Date(project.completedAt).getTime() + 7 * 24 * 60 * 60 * 1000),
+    }));
+
+  for (const target of archiveTargets) {
+    await Ticket.updateMany(
+      {
+        projectId: target.projectId,
+        archiveAfter: null,
+      },
+      {
+        $set: {
+          archiveAfter: target.archiveAfter,
+        },
+      }
+    );
+  }
+
+  const deleteResult = await Ticket.deleteMany({
+    projectId: { $in: archiveTargets.map((target) => target.projectId) },
+    archiveAfter: { $lte: new Date() },
+  });
+
+  return {
+    projectCount: archiveTargets.length,
+    deletedCount: deleteResult.deletedCount || 0,
+  };
 };

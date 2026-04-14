@@ -6,14 +6,32 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User";
 import Notification from "../models/Notification";
+import {
+  getPasswordValidationMessage,
+  isStrongPassword,
+  isValidEmail,
+} from "../utils/validation";
 
 // REGISTER - Creates new user and returns token
 export const register = async (req: Request, res: Response) => {
   try {
     const { name, email, password, role } = req.body;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
 
     // Check if user already exists
-    const existing = await User.findOne({ email });
+    if (!String(name || "").trim() || !normalizedEmail || !password) {
+      return res.status(400).json({ message: "Name, email, and password are required" });
+    }
+
+    if (!isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ message: "Please enter a valid email address" });
+    }
+
+    if (!isStrongPassword(password)) {
+      return res.status(400).json({ message: getPasswordValidationMessage() });
+    }
+
+    const existing = await User.findOne({ email: normalizedEmail });
     if (existing) {
       return res.status(400).json({ message: "User already exists" });
     }
@@ -24,7 +42,7 @@ export const register = async (req: Request, res: Response) => {
     // Create user
     const user = await User.create({
       name,
-      email,
+      email: normalizedEmail,
       password: hashed,
       role: role || "client",
     });
@@ -57,7 +75,8 @@ export const register = async (req: Request, res: Response) => {
 export const login = async (req: Request, res: Response) => {
   try {
     const { email, identifier, password } = req.body;
-    const loginId = identifier || email;
+    const loginId = String(identifier || email || "").trim();
+    const normalizedLoginId = loginId.toLowerCase();
 
     if (!loginId) {
       return res.status(400).json({ message: "Email or Client ID is required" });
@@ -66,7 +85,7 @@ export const login = async (req: Request, res: Response) => {
     // Find user by email OR customId (Client ID)
     const user = await User.findOne({
       $or: [
-        { email: loginId.toLowerCase() },
+        { email: normalizedLoginId },
         { customId: loginId }
       ]
     });
@@ -125,8 +144,8 @@ export const changePassword = async (req: Request, res: Response) => {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    if (!newPassword || !isStrongPassword(newPassword)) {
+      return res.status(400).json({ message: getPasswordValidationMessage() });
     }
 
     const user = await User.findById(userId);
