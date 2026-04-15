@@ -10,7 +10,7 @@ import { Project } from "../models/Project";
 import { Task } from "../models/Task";
 import User from "../models/User";
 import Notification from "../models/Notification";
-import { sendEmail, isEmailConfigured, escapeHtml } from "../services/email.service";
+import { sendEmail, isEmailConfigured, escapeHtml, getFrontendBaseUrl } from "../services/email.service";
 import {
   getPasswordValidationMessage,
   isStrongPassword,
@@ -305,11 +305,41 @@ export class UserController {
       });
 
       if (isEmailConfigured()) {
+        const loginUrl = `${getFrontendBaseUrl()}/login`;
         await sendEmail(
           developer.email,
           "Your Websmith developer account",
-          `Developer ID: ${developer.customId}\nTemporary Password: ${tempPassword}`,
-          `<p>Your Websmith developer account is ready.</p><p><strong>Developer ID:</strong> ${developer.customId}</p><p><strong>Temporary Password:</strong> ${tempPassword}</p>`
+          `Hello ${name},
+
+Your Websmith developer account is ready.
+
+Developer ID: ${developer.customId}
+Temporary Password: ${tempPassword}
+
+Log in to dashboard: ${loginUrl}`,
+          `
+            <div style="font-family: Arial, Helvetica, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e5e5ea; border-radius: 12px; background: #ffffff;">
+              <h2 style="color: #007AFF; margin-top: 0;">Welcome to Websmith</h2>
+              <p>Hello <strong>${escapeHtml(name)}</strong>,</p>
+              <p>Your developer account is ready.</p>
+              <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin: 16px 0;">
+                <p style="margin: 0 0 8px 0;"><strong>Developer ID:</strong> ${escapeHtml(developer.customId || "")}</p>
+                <p style="margin: 0;"><strong>Temporary Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 6px; border-radius: 4px;">${escapeHtml(tempPassword)}</code></p>
+              </div>
+              <p style="margin: 16px 0 10px 0;"><strong>Log in to your dashboard:</strong></p>
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 16px 0;">
+                <tr>
+                  <td align="center" style="border-radius: 8px; background-color: #007AFF;">
+                    <a href="${loginUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px;">Log in to dashboard</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin: 0 0 8px 0; font-size: 13px; color: #5f6368;">If the button does not work, copy and paste this URL:</p>
+              <p style="margin: 0; font-size: 13px; word-break: break-all;">
+                <a href="${loginUrl}" target="_blank" rel="noopener noreferrer" style="color: #007AFF; text-decoration: underline;">${loginUrl}</a>
+              </p>
+            </div>
+          `
         );
       }
 
@@ -539,29 +569,38 @@ export class UserController {
         setupCompleted: true,
       });
 
-      const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`;
+      const loginUrl = `${getFrontendBaseUrl()}/login`;
       const accountLabel = role === 'admin' ? 'Admin' : 'Developer';
       const emailSubject = `Your Websmith ${accountLabel} Account Credentials`;
-      const emailText = `
-        Hello ${name},
+      const emailText = `Hello ${name},
 
-        Your Websmith ${accountLabel.toLowerCase()} account has been created.
+Your Websmith ${accountLabel.toLowerCase()} account has been created.
 
-        Email: ${email}
-        Password: ${generatedPassword}
+Email: ${email}
+Temporary Password: ${generatedPassword}
 
-        Login here: ${loginUrl}
-      `;
+Log in to dashboard: ${loginUrl}`;
       const emailHtml = `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e5ea; border-radius: 12px;">
-          <h2 style="color: #007AFF;">Welcome to Websmith</h2>
+        <div style="font-family: Arial, Helvetica, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e5e5ea; border-radius: 12px; background: #ffffff;">
+          <h2 style="color: #007AFF; margin-top: 0;">Welcome to Websmith</h2>
           <p>Hello <strong>${escapeHtml(name)}</strong>,</p>
           <p>Your ${escapeHtml(accountLabel.toLowerCase())} account is ready.</p>
-          <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin: 20px 0;">
+          <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin: 16px 0;">
             <p style="margin: 0 0 8px 0;"><strong>Email:</strong> ${escapeHtml(email)}</p>
-            <p style="margin: 0;"><strong>Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 4px; border-radius: 4px;">${generatedPassword}</code></p>
+            <p style="margin: 0;"><strong>Temporary Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 6px; border-radius: 4px;">${escapeHtml(generatedPassword)}</code></p>
           </div>
-          <a href="${loginUrl}" style="display: inline-block; background-color: #007AFF; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Log In</a>
+          <p style="margin: 16px 0 10px 0;"><strong>Log in to your dashboard:</strong></p>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 16px 0;">
+            <tr>
+              <td align="center" style="border-radius: 8px; background-color: #007AFF;">
+                <a href="${loginUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px;">Log in to dashboard</a>
+              </td>
+            </tr>
+          </table>
+          <p style="margin: 0 0 8px 0; font-size: 13px; color: #5f6368;">If the button does not work, copy and paste this URL:</p>
+          <p style="margin: 0; font-size: 13px; word-break: break-all;">
+            <a href="${loginUrl}" target="_blank" rel="noopener noreferrer" style="color: #007AFF; text-decoration: underline;">${loginUrl}</a>
+          </p>
         </div>
       `;
 
