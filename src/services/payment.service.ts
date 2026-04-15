@@ -46,6 +46,8 @@ export interface CreateStripeCheckoutSessionPayload {
   cancelUrl: string;
   notes?: string;
   invoiceId?: string;
+  clientId?: string;
+  projectId?: string;
   customerEmail?: string;
 }
 
@@ -66,11 +68,22 @@ export interface UnifiedCreatePaymentPayload {
   cancelUrl?: string;
   notes?: string;
   invoiceId?: string;
+  clientId?: string;
+  projectId?: string;
   customerEmail?: string;
 }
 
 export const createStripeCheckoutSession = async (payload: CreateStripeCheckoutSessionPayload) => {
   const stripe = getStripeClient();
+  const metadata = {
+    paymentId: payload.paymentId,
+    invoiceId: payload.invoiceId || "",
+    invoiceNumber: payload.invoiceNumber,
+    clientId: payload.clientId || "",
+    projectId: payload.projectId || "",
+    notes: payload.notes || "",
+  };
+
   const session = await stripe.checkout.sessions.create({
     payment_method_types: ["card"],
     mode: "payment",
@@ -88,11 +101,9 @@ export const createStripeCheckoutSession = async (payload: CreateStripeCheckoutS
         quantity: 1,
       },
     ],
-    metadata: {
-      paymentId: payload.paymentId,
-      invoiceId: payload.invoiceId || "",
-      invoiceNumber: payload.invoiceNumber,
-      notes: payload.notes || "",
+    metadata,
+    payment_intent_data: {
+      metadata,
     },
     success_url: payload.successUrl,
     cancel_url: payload.cancelUrl,
@@ -123,6 +134,11 @@ export const createRazorpayOrder = async (payload: CreateRazorpayOrderPayload) =
 export const getRazorpayPayment = async (providerPaymentId: string) => {
   const razorpay = getRazorpayClient();
   return razorpay.payments.fetch(providerPaymentId);
+};
+
+export const getRazorpayOrderPayments = async (orderId: string) => {
+  const razorpay = getRazorpayClient();
+  return razorpay.orders.fetchPayments(orderId);
 };
 
 export const verifyRazorpayCheckoutSignature = ({
@@ -164,6 +180,8 @@ export const createPayment = async (payload: UnifiedCreatePaymentPayload) => {
       cancelUrl: payload.cancelUrl || "",
       notes: payload.notes,
       invoiceId: payload.invoiceId,
+      clientId: payload.clientId,
+      projectId: payload.projectId,
       customerEmail: payload.customerEmail,
     });
 
@@ -183,6 +201,8 @@ export const createPayment = async (payload: UnifiedCreatePaymentPayload) => {
         paymentId: payload.paymentId,
         invoiceId: payload.invoiceId || "",
         invoiceNumber: payload.invoiceNumber,
+        clientId: payload.clientId || "",
+        projectId: payload.projectId || "",
       },
     });
 

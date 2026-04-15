@@ -10,6 +10,7 @@ import {
   deletePayment,
   downloadPaymentReceipt,
   getPaymentById,
+  getGatewayPaymentStatus,
   getPaymentStats,
   getPayments,
   razorpayWebhook,
@@ -63,6 +64,9 @@ router.get('/status/:status', async (req, res) => {
   const payments = await Payment.find(scope).sort({ createdAt: -1 });
   res.status(200).json({ success: true, data: payments });
 });
+
+// GET /api/payments/:id/status - Reconcile and get gateway payment status
+router.get('/:id/status', getGatewayPaymentStatus);
 
 // GET /api/payments/:id - Get single payment
 router.get('/:id', getPaymentById);

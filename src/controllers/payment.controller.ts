@@ -1,14 +1,15 @@
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import Payment from "../models/Payment";
 import Invoice from "../models/Invoice";
+import PaymentWebhookEvent from "../models/PaymentWebhookEvent";
 import PDFDocument from "pdfkit";
 import {
   constructStripeWebhookEvent,
   createPayment as createProviderPayment,
-  getRazorpayPayment,
+  getRazorpayOrderPayments,
   getStripeCheckoutSession,
   PaymentProvider,
-  verifyRazorpayCheckoutSignature,
   verifyRazorpayWebhookSignature,
 } from "../services/payment.service";
 
@@ -41,17 +42,21 @@ const getInvoiceForUser = async (invoiceId: string, user: any) => {
   return Invoice.findById(invoiceId);
 };
 
-const updatePaymentAndInvoice = async (payment: any, updates: Partial<any>) => {
+const updatePaymentAndInvoice = async (
+  payment: any,
+  updates: Partial<any>,
+  session?: mongoose.ClientSession
+) => {
   Object.assign(payment, updates);
-  await payment.save();
+  await payment.save({ session });
 
   if (payment.invoiceId) {
-    const invoice = await Invoice.findById(payment.invoiceId);
+    const invoice = await Invoice.findById(payment.invoiceId).session(session || null);
     if (invoice) {
       const completedPayments = await Payment.find({
         invoiceId: payment.invoiceId,
         status: "completed",
-      });
+      }).session(session || null);
 
       const totalPaid = completedPayments.reduce((sum, completedPayment) => {
         return sum + Number(completedPayment.amount || 0);
@@ -68,11 +73,57 @@ const updatePaymentAndInvoice = async (payment: any, updates: Partial<any>) => {
         invoice.status = "pending";
       }
 
-      await invoice.save();
+      await invoice.save({ session });
     }
   }
 
   return payment;
+};
+
+const updatePaymentByWebhook = async ({
+  paymentId,
+  status,
+  providerPaymentId,
+  failureReason,
+}: {
+  paymentId: string;
+  status: "completed" | "failed";
+  providerPaymentId?: string | null;
+  failureReason?: string;
+}) => {
+  const dbSession = await mongoose.startSession();
+  try {
+    await dbSession.withTransaction(async () => {
+      const payment = await Payment.findById(paymentId).session(dbSession);
+      if (!payment) {
+        return;
+      }
+
+      if (payment.status === "completed") {
+        return;
+      }
+
+      if (status === "failed" && payment.status === "failed") {
+        return;
+      }
+
+      await updatePaymentAndInvoice(
+        payment,
+        {
+          status,
+          providerPaymentId: providerPaymentId || payment.providerPaymentId,
+          date: new Date(),
+          notes:
+            status === "failed"
+              ? failureReason || payment.notes || "Payment failed"
+              : payment.notes || "Payment completed via webhook",
+        },
+        dbSession
+      );
+    });
+  } finally {
+    await dbSession.endSession();
+  }
 };
 
 const normalizeProvider = (provider?: string): PaymentProvider | null => {
@@ -266,10 +317,12 @@ export const createGatewayPayment = async (req: Request, res: Response) => {
       paymentId: payment._id.toString(),
       invoiceId: invoice?._id?.toString(),
       invoiceNumber: payment.invoiceNumber,
+      clientId: String(payment.clientId || ""),
+      projectId: String(invoice?.projectId || ""),
       notes: payment.notes,
       customerEmail: payment.clientEmail,
-      successUrl: `${frontendUrl}/client/invoices?paymentStatus=success&provider=${provider}&paymentId=${payment._id.toString()}&session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${frontendUrl}/client/invoices?paymentStatus=cancelled&provider=${provider}&paymentId=${payment._id.toString()}`,
+      successUrl: `${frontendUrl}/client/invoices?paymentStatus=success&provider=${provider}&paymentId=${payment._id.toString()}&invoiceId=${invoice?._id?.toString() || ""}&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${frontendUrl}/client/invoices?paymentStatus=cancelled&provider=${provider}&paymentId=${payment._id.toString()}&invoiceId=${invoice?._id?.toString() || ""}`,
     });
 
     if (provider === "stripe") {
@@ -329,22 +382,51 @@ export const stripeWebhook = async (req: Request, res: Response) => {
   }
 
   try {
+    const eventId = String(event.id || "");
+    const existingEvent = eventId
+      ? await PaymentWebhookEvent.findOne({ provider: "stripe", providerEventId: eventId })
+      : null;
+    if (existingEvent) {
+      return res.json({ received: true, duplicate: true });
+    }
+
+    const webhookEvent = await PaymentWebhookEvent.create({
+      provider: "stripe",
+      providerEventId: eventId || `stripe-${Date.now()}`,
+      eventType: event.type,
+      payload: event,
+      status: "received",
+    });
+
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as any;
       const paymentId = session.metadata?.paymentId || session.client_reference_id;
       const providerPaymentId = session.payment_intent || session.id;
 
       if (paymentId) {
-        const payment = await Payment.findById(paymentId);
-        if (payment && payment.status !== "completed") {
-          await updatePaymentAndInvoice(payment, {
-            status: "completed",
-            providerPaymentId,
-            notes: payment.notes || "Stripe checkout completed",
-          });
-        }
+        await updatePaymentByWebhook({
+          paymentId,
+          status: "completed",
+          providerPaymentId,
+        });
+      }
+    } else if (event.type === "checkout.session.expired" || event.type === "payment_intent.payment_failed") {
+      const object = event.data.object as any;
+      const paymentId = object.metadata?.paymentId || object.client_reference_id;
+      const failureReason =
+        object?.last_payment_error?.message || object?.cancellation_reason || "Stripe payment failed";
+
+      if (paymentId) {
+        await updatePaymentByWebhook({
+          paymentId,
+          status: "failed",
+          providerPaymentId: object.id,
+          failureReason,
+        });
       }
     }
+    webhookEvent.status = "processed";
+    await webhookEvent.save();
   } catch (error) {
     console.error("Stripe webhook processing failed:", error);
     return res.status(500).send("Webhook processing error");
@@ -369,6 +451,24 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
 
   try {
     const eventType = payload.event;
+    const eventId = String(payload?.payload?.payment?.entity?.id || payload?.payload?.order?.entity?.id || "");
+    const eventReference = `${eventType}:${eventId || Date.now()}`;
+    const existingEvent = await PaymentWebhookEvent.findOne({
+      provider: "razorpay",
+      providerEventId: eventReference,
+    });
+    if (existingEvent) {
+      return res.json({ received: true, duplicate: true });
+    }
+
+    const webhookEvent = await PaymentWebhookEvent.create({
+      provider: "razorpay",
+      providerEventId: eventReference,
+      eventType,
+      payload,
+      status: "received",
+    });
+
     const paymentEntity = payload?.payload?.payment?.entity;
     const orderEntity = payload?.payload?.order?.entity;
     const paymentId = paymentEntity?.notes?.paymentId || orderEntity?.notes?.paymentId || orderEntity?.receipt || null;
@@ -378,23 +478,22 @@ export const razorpayWebhook = async (req: Request, res: Response) => {
       return res.status(200).json({ received: true });
     }
 
-    const payment = await Payment.findById(paymentId);
-    if (!payment) {
-      return res.status(200).json({ received: true });
-    }
-
-    if ((eventType === "payment.captured" || eventType === "order.paid") && payment.status !== "completed") {
-      await updatePaymentAndInvoice(payment, {
+    if (eventType === "payment.captured" || eventType === "order.paid") {
+      await updatePaymentByWebhook({
+        paymentId,
         status: "completed",
-        providerPaymentId: providerPaymentId || payment.providerPaymentId,
-        notes: payment.notes || "Razorpay payment captured",
+        providerPaymentId,
       });
-    } else if (eventType === "payment.failed" && payment.status !== "failed") {
-      await updatePaymentAndInvoice(payment, {
+    } else if (eventType === "payment.failed") {
+      await updatePaymentByWebhook({
+        paymentId,
         status: "failed",
-        providerPaymentId: providerPaymentId || payment.providerPaymentId,
+        providerPaymentId,
+        failureReason: paymentEntity?.error_description || paymentEntity?.error_reason || "Razorpay payment failed",
       });
     }
+    webhookEvent.status = "processed";
+    await webhookEvent.save();
   } catch (error) {
     console.error("Razorpay webhook processing failed:", error);
     return res.status(500).send("Webhook processing error");
@@ -553,98 +652,79 @@ export const verifyPayment = async (req: Request, res: Response) => {
 };
 
 export const confirmGatewayPayment = async (req: Request, res: Response) => {
+  return res.status(410).json({
+    success: false,
+    message: "Manual payment confirmation is disabled. Payment status is updated via secure webhooks only.",
+  });
+};
+
+const reconcileGatewayPayment = async (payment: any) => {
+  if (payment.status !== "pending" || !payment.provider) {
+    return payment;
+  }
+
+  if (payment.provider === "stripe" && payment.providerPaymentId) {
+    const session = await getStripeCheckoutSession(payment.providerPaymentId);
+    if (session.payment_status === "paid") {
+      await updatePaymentByWebhook({
+        paymentId: payment._id.toString(),
+        status: "completed",
+        providerPaymentId: String(session.payment_intent || session.id),
+      });
+      return Payment.findById(payment._id);
+    }
+
+    if (session.status === "expired") {
+      await updatePaymentByWebhook({
+        paymentId: payment._id.toString(),
+        status: "failed",
+        providerPaymentId: String(session.id),
+        failureReason: "Stripe checkout expired",
+      });
+      return Payment.findById(payment._id);
+    }
+  }
+
+  if (payment.provider === "razorpay" && payment.providerPaymentId) {
+    const orderPayments = await getRazorpayOrderPayments(payment.providerPaymentId);
+    const capturedPayment = (orderPayments.items || []).find((item: any) => {
+      const status = String(item?.status || "").toLowerCase();
+      return status === "captured" || status === "authorized";
+    });
+
+    if (capturedPayment) {
+      await updatePaymentByWebhook({
+        paymentId: payment._id.toString(),
+        status: "completed",
+        providerPaymentId: capturedPayment.id || payment.providerPaymentId,
+      });
+      return Payment.findById(payment._id);
+    }
+  }
+
+  return payment;
+};
+
+export const getGatewayPaymentStatus = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const userId = (req as any).userId;
     if (!user || !userId) return res.status(401).json({ success: false, message: "Unauthorized" });
 
-    const {
-      provider: rawProvider,
-      paymentId,
-      sessionId,
-      razorpayPaymentId,
-      razorpayOrderId,
-      razorpaySignature,
-    } = req.body || {};
-
-    const provider = normalizeProvider(rawProvider);
-    if (!provider) {
-      return res.status(400).json({ success: false, message: "Invalid payment provider" });
-    }
-
-    if (!paymentId) {
-      return res.status(400).json({ success: false, message: "paymentId is required" });
-    }
-
+    const paymentId = req.params.id;
     const scope = user.role === "client" ? { _id: paymentId, clientId: userId } : { _id: paymentId, userId };
     const payment = await Payment.findOne(scope);
     if (!payment) {
       return res.status(404).json({ success: false, message: "Payment not found" });
     }
 
-    if (payment.status === "completed") {
-      return res.json({ success: true, data: payment });
-    }
-
-    if (provider === "stripe") {
-      if (!sessionId) {
-        return res.status(400).json({ success: false, message: "sessionId is required for Stripe confirmation" });
-      }
-
-      const session = await getStripeCheckoutSession(sessionId);
-      const sessionPaymentId = session.metadata?.paymentId || session.client_reference_id;
-
-      if (sessionPaymentId !== payment._id.toString()) {
-        return res.status(400).json({ success: false, message: "Stripe session does not match payment" });
-      }
-
-      if (session.payment_status !== "paid") {
-        return res.status(409).json({ success: false, message: "Stripe payment is not confirmed yet" });
-      }
-
-      await updatePaymentAndInvoice(payment, {
-        status: "completed",
-        providerPaymentId: String(session.payment_intent || session.id),
-      });
-
-      return res.json({ success: true, data: payment });
-    }
-
-    if (!razorpayPaymentId || !razorpayOrderId || !razorpaySignature) {
-      return res.status(400).json({
-        success: false,
-        message: "razorpayPaymentId, razorpayOrderId, and razorpaySignature are required",
-      });
-    }
-
-    const isValidSignature = verifyRazorpayCheckoutSignature({
-      orderId: razorpayOrderId,
-      paymentId: razorpayPaymentId,
-      signature: razorpaySignature,
-    });
-
-    if (!isValidSignature) {
-      return res.status(400).json({ success: false, message: "Invalid Razorpay payment signature" });
-    }
-
-    const razorpayPayment = await getRazorpayPayment(razorpayPaymentId);
-    const capturedStatuses = new Set(["captured", "authorized"]);
-
-    if (!capturedStatuses.has(String(razorpayPayment.status || "").toLowerCase())) {
-      return res.status(409).json({ success: false, message: "Razorpay payment is not confirmed yet" });
-    }
-
-    await updatePaymentAndInvoice(payment, {
-      status: "completed",
-      providerPaymentId: razorpayPaymentId,
-    });
-
-    return res.json({ success: true, data: payment });
+    const reconciled = await reconcileGatewayPayment(payment);
+    return res.json({ success: true, data: reconciled });
   } catch (error) {
-    console.error("Confirm gateway payment error:", error);
+    console.error("Get gateway payment status error:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to confirm payment",
+      message: "Failed to fetch payment status",
       error: error instanceof Error ? error.message : "Unknown error",
     });
   }
