@@ -71,3 +71,12 @@ export const escapeHtml = (value: string) => {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 };
+
+export const getFrontendBaseUrl = () => {
+  return (
+    process.env.FRONTEND_URL ||
+    process.env.APP_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    "https://websmith-z.vercel.app"
+  ).replace(/\/$/, "");
+};

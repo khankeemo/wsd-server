@@ -9,7 +9,7 @@ import { Client } from "../models/Client";
 import { Project } from "../models/Project";
 import { Task } from "../models/Task";
 import User from "../models/User";
-import { sendEmail, escapeHtml, isEmailConfigured } from "../services/email.service";
+import { sendEmail, escapeHtml, isEmailConfigured, getFrontendBaseUrl } from "../services/email.service";
 import { isValidEmail, isValidPhone } from "../utils/validation";
 
 // Helper to get userId from request
@@ -211,32 +211,40 @@ export const createClient = async (req: Request, res: Response) => {
       published,
     });
 
-    const loginUrl = `${(process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "")}/login`;
+    const loginUrl = `${getFrontendBaseUrl()}/login`;
     const emailSubject = "Your Websmith Client Account Credentials";
-    const emailText = `
-      Welcome to Websmith, ${name}!
-      
-      Your client account has been created. Please use the following credentials to log in:
-      
-      Client ID: ${customId}
-      Temporary Password: ${tempPassword}
-      
-      Log in here: ${loginUrl}
-      
-      Note: You will be required to change your password upon your first login.
-    `;
+    const emailText = `Welcome to Websmith, ${name}!
+
+Your client account has been created. Please use the following credentials to log in:
+
+Client ID: ${customId}
+Temporary Password: ${tempPassword}
+
+Log in to dashboard: ${loginUrl}
+
+You will be required to change your password after your first login.`;
     const emailHtml = `
-      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e5e5ea; border-radius: 12px;">
-        <h2 style="color: #007AFF;">Welcome to Websmith!</h2>
+      <div style="font-family: Arial, Helvetica, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e5e5ea; border-radius: 12px; background: #ffffff;">
+        <h2 style="color: #007AFF; margin-top: 0;">Welcome to Websmith!</h2>
         <p>Hello <strong>${escapeHtml(name)}</strong>,</p>
-        <p>Your client account has been successfully created. You can now access your dashboard using the credentials below:</p>
-        <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin: 20px 0;">
-          <p style="margin: 0; margin-bottom: 8px;"><strong>Client ID:</strong> ${customId}</p>
-          <p style="margin: 0;"><strong>Temporary Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 4px; border-radius: 4px;">${tempPassword}</code></p>
+        <p style="margin-bottom: 16px;">Your client account has been created. Use the credentials below to access your dashboard:</p>
+        <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin: 16px 0;">
+          <p style="margin: 0 0 8px 0;"><strong>Client ID:</strong> ${escapeHtml(customId || "")}</p>
+          <p style="margin: 0;"><strong>Temporary Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 6px; border-radius: 4px;">${escapeHtml(tempPassword)}</code></p>
         </div>
-        <p>Please log in through our portal:</p>
-        <a href="${loginUrl}" style="display: inline-block; background-color: #007AFF; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600;">Log In to Dashboard</a>
-        <p style="margin-top: 20px; font-size: 14px; color: #8E8E93;">Note: For security reasons, you will be required to change this temporary password upon your first login.</p>
+        <p style="margin: 16px 0 10px 0;"><strong>Log in to your dashboard:</strong></p>
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 16px 0;">
+          <tr>
+            <td align="center" style="border-radius: 8px; background-color: #007AFF;">
+              <a href="${loginUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px;">Log in to dashboard</a>
+            </td>
+          </tr>
+        </table>
+        <p style="margin: 0 0 8px 0; font-size: 13px; color: #5f6368;">If the button does not work, copy and paste this URL:</p>
+        <p style="margin: 0 0 16px 0; font-size: 13px; word-break: break-all;">
+          <a href="${loginUrl}" target="_blank" rel="noopener noreferrer" style="color: #007AFF; text-decoration: underline;">${loginUrl}</a>
+        </p>
+        <p style="margin: 0; font-size: 14px; color: #8E8E93;">For security, you will be required to change this temporary password after your first login.</p>
       </div>
     `;
 
