@@ -35,10 +35,6 @@ export interface IUser extends Document {
   status?: "active" | "inactive" | "on-leave";
   experienceYears?: number;
   joinedAt?: Date | null;
-  passwordResetOtpHash?: string;
-  passwordResetOtpExpiresAt?: Date | null;
-  passwordResetVerifiedTokenHash?: string;
-  passwordResetVerifiedTokenExpiresAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -160,22 +156,6 @@ const UserSchema = new Schema<IUser>(
       min: 0,
     },
     joinedAt: {
-      type: Date,
-      default: null,
-    },
-    passwordResetOtpHash: {
-      type: String,
-      default: "",
-    },
-    passwordResetOtpExpiresAt: {
-      type: Date,
-      default: null,
-    },
-    passwordResetVerifiedTokenHash: {
-      type: String,
-      default: "",
-    },
-    passwordResetVerifiedTokenExpiresAt: {
       type: Date,
       default: null,
     },
