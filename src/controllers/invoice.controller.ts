@@ -31,6 +31,26 @@ const calculateAmount = (items: any[] = [], tax = 0, discount = 0) => {
   return subtotal + Number(tax || 0) - Number(discount || 0);
 };
 
+const getInvoiceStatusFromAmounts = (invoice: any) => {
+  const amount = Number(invoice.amount || 0);
+  const paidAmount = Number(invoice.paidAmount || 0);
+  const dueAmount = Math.max(amount - paidAmount, 0);
+
+  if (invoice.status === "draft") {
+    return "draft";
+  }
+
+  if (dueAmount <= 0) {
+    return "paid";
+  }
+
+  if (paidAmount > 0) {
+    return "partially_paid";
+  }
+
+  return "pending";
+};
+
 const hydrateInvoicePayload = async (payload: any) => {
   const hydrated = { ...payload };
 
@@ -121,6 +141,8 @@ export const createInvoice = async (req: Request, res: Response) => {
       userId,
       invoiceNumber: payload.invoiceNumber || buildInvoiceNumber(),
       amount: calculateAmount(payload.items, payload.tax, payload.discount),
+      paidAmount: 0,
+      dueAmount: calculateAmount(payload.items, payload.tax, payload.discount),
     });
 
     if (invoice.clientId) {
@@ -171,6 +193,8 @@ export const updateInvoice = async (req: Request, res: Response) => {
     const payload = await hydrateInvoicePayload({ ...invoice.toObject(), ...req.body });
     Object.assign(invoice, payload);
     invoice.amount = calculateAmount(invoice.items as any[], invoice.tax, invoice.discount);
+    invoice.dueAmount = Math.max(invoice.amount - Number(invoice.paidAmount || 0), 0);
+    invoice.status = getInvoiceStatusFromAmounts(invoice);
     await invoice.save();
 
     res.json({ success: true, data: invoice });
@@ -206,6 +230,8 @@ export const markInvoicePaid = async (req: Request, res: Response) => {
     if (!invoice) return res.status(404).json({ success: false, message: "Invoice not found" });
 
     invoice.status = "paid";
+    invoice.paidAmount = Number(invoice.amount || 0);
+    invoice.dueAmount = 0;
     await invoice.save();
 
     res.json({ success: true, data: invoice });
@@ -228,12 +254,12 @@ export const getInvoiceStats = async (req: Request, res: Response) => {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       due.setHours(0, 0, 0, 0);
-      return due < today && (inv.status === "pending" || inv.status === "draft");
+      return due < today && (inv.status === "pending" || inv.status === "partially_paid" || inv.status === "draft");
     };
     const isPendingDisplay = (inv: (typeof invoices)[0]) => {
       if (inv.status === "paid" || inv.status === "overdue") return false;
       if (isOverdue(inv)) return false;
-      return inv.status === "pending" || inv.status === "draft";
+      return inv.status === "pending" || inv.status === "partially_paid" || inv.status === "draft";
     };
     let pending = 0;
     let overdue = 0;
@@ -249,6 +275,8 @@ export const getInvoiceStats = async (req: Request, res: Response) => {
         pending,
         overdue,
         totalAmount: invoices.reduce((sum, invoice) => sum + invoice.amount, 0),
+        totalPaidAmount: invoices.reduce((sum, invoice) => sum + Number(invoice.paidAmount || 0), 0),
+        totalPendingAmount: invoices.reduce((sum, invoice) => sum + Number(invoice.dueAmount ?? invoice.amount), 0),
       },
     });
   } catch (error) {

@@ -4,13 +4,17 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.middleware';
 import {
+  createGatewayPayment,
+  confirmGatewayPayment,
   createPayment,
   deletePayment,
   downloadPaymentReceipt,
   getPaymentById,
   getPaymentStats,
   getPayments,
+  razorpayWebhook,
   refundPayment,
+  stripeWebhook,
   updatePayment,
   verifyPayment,
 } from '../controllers/payment.controller';
@@ -18,8 +22,17 @@ import Payment from '../models/Payment';
 
 const router = Router();
 
-// All routes require authentication
+router.post('/stripe/webhook', stripeWebhook);
+router.post('/razorpay/webhook', razorpayWebhook);
+
+// All remaining routes require authentication
 router.use(authMiddleware);
+
+// POST /api/payments/create - Initialize provider payment flow
+router.post('/create', createGatewayPayment);
+
+// POST /api/payments/confirm - Confirm provider payment after redirect/callback
+router.post('/confirm', confirmGatewayPayment);
 
 // GET /api/payments - Get all payments
 router.get('/', getPayments);

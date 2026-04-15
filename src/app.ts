@@ -58,7 +58,13 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    if (buf && buf.length) {
+      (req as any).rawBody = buf;
+    }
+  },
+}));
 app.use(async (_req, _res, next) => {
   try {
     await connectDB();

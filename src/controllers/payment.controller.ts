@@ -2,6 +2,15 @@ import { Request, Response } from "express";
 import Payment from "../models/Payment";
 import Invoice from "../models/Invoice";
 import PDFDocument from "pdfkit";
+import {
+  constructStripeWebhookEvent,
+  createPayment as createProviderPayment,
+  getRazorpayPayment,
+  getStripeCheckoutSession,
+  PaymentProvider,
+  verifyRazorpayCheckoutSignature,
+  verifyRazorpayWebhookSignature,
+} from "../services/payment.service";
 
 const getPaymentScope = (req: Request) => {
   const user = (req as any).user;
@@ -20,6 +29,378 @@ const getPaymentScope = (req: Request) => {
   }
 
   return { _id: null };
+};
+
+const getInvoiceForUser = async (invoiceId: string, user: any) => {
+  if (!invoiceId) return null;
+
+  if (user.role === "client") {
+    return Invoice.findOne({ _id: invoiceId, clientId: user._id });
+  }
+
+  return Invoice.findById(invoiceId);
+};
+
+const updatePaymentAndInvoice = async (payment: any, updates: Partial<any>) => {
+  Object.assign(payment, updates);
+  await payment.save();
+
+  if (payment.invoiceId) {
+    const invoice = await Invoice.findById(payment.invoiceId);
+    if (invoice) {
+      const completedPayments = await Payment.find({
+        invoiceId: payment.invoiceId,
+        status: "completed",
+      });
+
+      const totalPaid = completedPayments.reduce((sum, completedPayment) => {
+        return sum + Number(completedPayment.amount || 0);
+      }, 0);
+
+      invoice.paidAmount = Math.min(totalPaid, Number(invoice.amount || 0));
+      invoice.dueAmount = Math.max(Number(invoice.amount || 0) - invoice.paidAmount, 0);
+
+      if (invoice.dueAmount <= 0) {
+        invoice.status = "paid";
+      } else if (invoice.paidAmount > 0) {
+        invoice.status = "partially_paid";
+      } else if (invoice.status === "paid") {
+        invoice.status = "pending";
+      }
+
+      await invoice.save();
+    }
+  }
+
+  return payment;
+};
+
+const normalizeProvider = (provider?: string): PaymentProvider | null => {
+  if (provider === "stripe" || provider === "razorpay") {
+    return provider;
+  }
+
+  return null;
+};
+
+const normalizeProviderCurrency = (provider: PaymentProvider, currency?: string) => {
+  const fallback = provider === "razorpay" ? "INR" : "USD";
+  return (currency || fallback).toUpperCase();
+};
+
+const buildStandalonePaymentReference = () => `PAY-${Date.now()}`;
+
+const createPendingPaymentRecord = async ({
+  req,
+  user,
+  invoice,
+  provider,
+  amount,
+  currency,
+  notes,
+}: {
+  req: Request;
+  user: any;
+  invoice?: any;
+  provider: PaymentProvider;
+  amount: number;
+  currency: string;
+  notes?: string;
+}) => {
+  const userId = (req as any).userId;
+  const invoiceNumber = invoice?.invoiceNumber || buildStandalonePaymentReference();
+
+  return Payment.create({
+    userId: invoice?.userId || userId,
+    clientId: invoice?.clientId || (user.role === "client" ? userId : null),
+    invoiceId: invoice?._id || null,
+    invoiceNumber,
+    clientName: invoice?.clientName || user.name,
+    clientEmail: invoice?.clientEmail || user.email,
+    amount,
+    currency,
+    provider,
+    providerPaymentId: "",
+    method: "card",
+    status: "pending",
+    transactionId: `PAY-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
+    date: new Date(),
+    notes: notes || `Online payment initiated via ${provider}`,
+  });
+};
+
+const syncPendingPaymentRecord = async ({
+  payment,
+  req,
+  user,
+  invoice,
+  provider,
+  amount,
+  currency,
+  notes,
+}: {
+  payment: any;
+  req: Request;
+  user: any;
+  invoice?: any;
+  provider: PaymentProvider;
+  amount: number;
+  currency: string;
+  notes?: string;
+}) => {
+  const userId = (req as any).userId;
+
+  payment.userId = invoice?.userId || userId;
+  payment.clientId = invoice?.clientId || (user.role === "client" ? userId : null);
+  payment.invoiceId = invoice?._id || null;
+  payment.invoiceNumber = invoice?.invoiceNumber || payment.invoiceNumber || buildStandalonePaymentReference();
+  payment.clientName = invoice?.clientName || user.name;
+  payment.clientEmail = invoice?.clientEmail || user.email;
+  payment.amount = amount;
+  payment.currency = currency;
+  payment.provider = provider;
+  payment.providerPaymentId = "";
+  payment.method = "card";
+  payment.notes = notes || `Online payment initiated via ${provider}`;
+
+  await payment.save();
+  return payment;
+};
+
+export const createGatewayPayment = async (req: Request, res: Response) => {
+  try {
+    console.log("REQ BODY:", req.body);
+
+    const user = (req as any).user;
+    const userId = (req as any).userId;
+    if (!user || !userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const { provider: rawProvider, invoiceId, notes, amount: rawAmount, currency } = req.body;
+    const provider = normalizeProvider(rawProvider);
+
+    if (!provider) {
+      return res.status(400).json({ success: false, message: "Invalid payment provider" });
+    }
+
+    if (!invoiceId) {
+      if (!Number.isFinite(Number(rawAmount)) || Number(rawAmount) <= 0) {
+        return res.status(400).json({ success: false, message: "amount must be a valid number" });
+      }
+
+      if (!currency || typeof currency !== "string") {
+        return res.status(400).json({ success: false, message: "currency is required" });
+      }
+    }
+
+    let invoice = null;
+    if (invoiceId) {
+      invoice = await getInvoiceForUser(invoiceId, user);
+      if (!invoice) {
+        return res.status(404).json({ success: false, message: "Invoice not found" });
+      }
+
+      if (invoice.dueAmount <= 0 || invoice.status === "paid") {
+        return res.status(400).json({ success: false, message: "Invoice is already paid" });
+      }
+    }
+
+    const amount = invoice?.dueAmount ?? invoice?.amount ?? Number(rawAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, message: "A valid amount is required" });
+    }
+
+    const providerCurrency = normalizeProviderCurrency(provider, invoice ? undefined : currency);
+
+    const existingPendingFilter: any = {
+      provider,
+      status: "pending",
+    };
+
+    if (invoice?._id) {
+      existingPendingFilter.invoiceId = invoice._id;
+    } else {
+      existingPendingFilter.userId = userId;
+      existingPendingFilter.amount = amount;
+      existingPendingFilter.currency = providerCurrency;
+      existingPendingFilter.invoiceId = null;
+    }
+
+    let payment = await Payment.findOne(existingPendingFilter).sort({ createdAt: -1 });
+    if (!payment) {
+      payment = await createPendingPaymentRecord({
+        req,
+        user,
+        invoice,
+        provider,
+        amount,
+        currency: providerCurrency,
+        notes,
+      });
+    } else {
+      payment = await syncPendingPaymentRecord({
+        payment,
+        req,
+        user,
+        invoice,
+        provider,
+        amount,
+        currency: providerCurrency,
+        notes,
+      });
+    }
+
+    console.log("PAYMENT INIT:", {
+      paymentId: payment._id.toString(),
+      provider,
+      amount: payment.amount,
+      currency: payment.currency,
+      invoiceId: invoice?._id?.toString() || null,
+      invoiceNumber: payment.invoiceNumber,
+    });
+
+    const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
+    const providerResponse = await createProviderPayment({
+      provider,
+      amount: payment.amount,
+      currency: payment.currency,
+      paymentId: payment._id.toString(),
+      invoiceId: invoice?._id?.toString(),
+      invoiceNumber: payment.invoiceNumber,
+      notes: payment.notes,
+      customerEmail: payment.clientEmail,
+      successUrl: `${frontendUrl}/client/invoices?paymentStatus=success&provider=${provider}&paymentId=${payment._id.toString()}&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${frontendUrl}/client/invoices?paymentStatus=cancelled&provider=${provider}&paymentId=${payment._id.toString()}`,
+    });
+
+    if (provider === "stripe") {
+      payment.providerPaymentId = providerResponse.sessionId;
+      await payment.save();
+
+      return res.status(201).json({
+        success: true,
+        data: {
+          provider: "stripe",
+          checkoutUrl: providerResponse.checkoutUrl,
+          paymentId: payment._id,
+        },
+      });
+    }
+
+    payment.providerPaymentId = providerResponse.order.id;
+    await payment.save();
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        provider: "razorpay",
+        order: providerResponse.order,
+        keyId: providerResponse.keyId,
+        paymentId: payment._id,
+      },
+    });
+  } catch (error) {
+    console.error("PAYMENT ERROR:", error);
+    const errorMessage = error instanceof Error ? error.message : "Failed to initialize payment";
+    return res.status(500).json({
+      success: false,
+      message: "Failed to initialize payment",
+      error: errorMessage,
+    });
+  }
+};
+
+export const stripeWebhook = async (req: Request, res: Response) => {
+  const signature = req.headers["stripe-signature"] as string;
+  if (!signature) {
+    return res.status(400).send("Missing Stripe webhook signature.");
+  }
+
+  let event;
+  try {
+    const rawBody = (req as any).rawBody as Buffer | string;
+    if (!rawBody) {
+      throw new Error("Missing raw body for Stripe webhook verification.");
+    }
+
+    event = constructStripeWebhookEvent(rawBody, signature);
+  } catch (error: any) {
+    console.error("Stripe webhook verification failed:", error.message || error);
+    return res.status(400).send(`Webhook Error: ${error.message}`);
+  }
+
+  try {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as any;
+      const paymentId = session.metadata?.paymentId || session.client_reference_id;
+      const providerPaymentId = session.payment_intent || session.id;
+
+      if (paymentId) {
+        const payment = await Payment.findById(paymentId);
+        if (payment && payment.status !== "completed") {
+          await updatePaymentAndInvoice(payment, {
+            status: "completed",
+            providerPaymentId,
+            notes: payment.notes || "Stripe checkout completed",
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Stripe webhook processing failed:", error);
+    return res.status(500).send("Webhook processing error");
+  }
+
+  res.json({ received: true });
+};
+
+export const razorpayWebhook = async (req: Request, res: Response) => {
+  const signature = req.headers["x-razorpay-signature"] as string;
+  if (!signature) {
+    return res.status(400).send("Missing Razorpay webhook signature.");
+  }
+
+  const payload = req.body;
+  const rawBody = (req as any).rawBody as Buffer | string;
+
+  if (!rawBody || !verifyRazorpayWebhookSignature(rawBody, signature)) {
+    console.error("Invalid Razorpay webhook signature");
+    return res.status(400).send("Invalid signature");
+  }
+
+  try {
+    const eventType = payload.event;
+    const paymentEntity = payload?.payload?.payment?.entity;
+    const orderEntity = payload?.payload?.order?.entity;
+    const paymentId = paymentEntity?.notes?.paymentId || orderEntity?.notes?.paymentId || orderEntity?.receipt || null;
+    const providerPaymentId = paymentEntity?.id || orderEntity?.id || null;
+
+    if (!paymentId) {
+      return res.status(200).json({ received: true });
+    }
+
+    const payment = await Payment.findById(paymentId);
+    if (!payment) {
+      return res.status(200).json({ received: true });
+    }
+
+    if ((eventType === "payment.captured" || eventType === "order.paid") && payment.status !== "completed") {
+      await updatePaymentAndInvoice(payment, {
+        status: "completed",
+        providerPaymentId: providerPaymentId || payment.providerPaymentId,
+        notes: payment.notes || "Razorpay payment captured",
+      });
+    } else if (eventType === "payment.failed" && payment.status !== "failed") {
+      await updatePaymentAndInvoice(payment, {
+        status: "failed",
+        providerPaymentId: providerPaymentId || payment.providerPaymentId,
+      });
+    }
+  } catch (error) {
+    console.error("Razorpay webhook processing failed:", error);
+    return res.status(500).send("Webhook processing error");
+  }
+
+  res.json({ received: true });
 };
 
 export const getPayments = async (req: Request, res: Response) => {
@@ -82,8 +463,7 @@ export const createPayment = async (req: Request, res: Response) => {
         notes: payload.notes || `Client payment for ${invoice.invoiceNumber}`,
       });
 
-      invoice.status = "paid";
-      await invoice.save();
+      await updatePaymentAndInvoice(payment, {});
 
       return res.status(201).json({ success: true, data: payment });
     }
@@ -97,9 +477,7 @@ export const createPayment = async (req: Request, res: Response) => {
       date: payload.date ? new Date(payload.date) : new Date(),
     });
 
-    if (payment.invoiceId && payment.status === "completed") {
-      await Invoice.findByIdAndUpdate(payment.invoiceId, { status: "paid" });
-    }
+    await updatePaymentAndInvoice(payment, {});
 
     res.status(201).json({ success: true, data: payment });
   } catch (error) {
@@ -155,9 +533,7 @@ export const refundPayment = async (req: Request, res: Response) => {
 
     payment.status = "refunded";
     await payment.save();
-    if (payment.invoiceId) {
-      await Invoice.findByIdAndUpdate(payment.invoiceId, { status: "pending" });
-    }
+    await updatePaymentAndInvoice(payment, {});
 
     res.json({ success: true, data: payment });
   } catch (error) {
@@ -173,6 +549,104 @@ export const verifyPayment = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Verify payment error:", error);
     res.status(500).json({ success: false, message: "Failed to verify payment" });
+  }
+};
+
+export const confirmGatewayPayment = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const userId = (req as any).userId;
+    if (!user || !userId) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    const {
+      provider: rawProvider,
+      paymentId,
+      sessionId,
+      razorpayPaymentId,
+      razorpayOrderId,
+      razorpaySignature,
+    } = req.body || {};
+
+    const provider = normalizeProvider(rawProvider);
+    if (!provider) {
+      return res.status(400).json({ success: false, message: "Invalid payment provider" });
+    }
+
+    if (!paymentId) {
+      return res.status(400).json({ success: false, message: "paymentId is required" });
+    }
+
+    const scope = user.role === "client" ? { _id: paymentId, clientId: userId } : { _id: paymentId, userId };
+    const payment = await Payment.findOne(scope);
+    if (!payment) {
+      return res.status(404).json({ success: false, message: "Payment not found" });
+    }
+
+    if (payment.status === "completed") {
+      return res.json({ success: true, data: payment });
+    }
+
+    if (provider === "stripe") {
+      if (!sessionId) {
+        return res.status(400).json({ success: false, message: "sessionId is required for Stripe confirmation" });
+      }
+
+      const session = await getStripeCheckoutSession(sessionId);
+      const sessionPaymentId = session.metadata?.paymentId || session.client_reference_id;
+
+      if (sessionPaymentId !== payment._id.toString()) {
+        return res.status(400).json({ success: false, message: "Stripe session does not match payment" });
+      }
+
+      if (session.payment_status !== "paid") {
+        return res.status(409).json({ success: false, message: "Stripe payment is not confirmed yet" });
+      }
+
+      await updatePaymentAndInvoice(payment, {
+        status: "completed",
+        providerPaymentId: String(session.payment_intent || session.id),
+      });
+
+      return res.json({ success: true, data: payment });
+    }
+
+    if (!razorpayPaymentId || !razorpayOrderId || !razorpaySignature) {
+      return res.status(400).json({
+        success: false,
+        message: "razorpayPaymentId, razorpayOrderId, and razorpaySignature are required",
+      });
+    }
+
+    const isValidSignature = verifyRazorpayCheckoutSignature({
+      orderId: razorpayOrderId,
+      paymentId: razorpayPaymentId,
+      signature: razorpaySignature,
+    });
+
+    if (!isValidSignature) {
+      return res.status(400).json({ success: false, message: "Invalid Razorpay payment signature" });
+    }
+
+    const razorpayPayment = await getRazorpayPayment(razorpayPaymentId);
+    const capturedStatuses = new Set(["captured", "authorized"]);
+
+    if (!capturedStatuses.has(String(razorpayPayment.status || "").toLowerCase())) {
+      return res.status(409).json({ success: false, message: "Razorpay payment is not confirmed yet" });
+    }
+
+    await updatePaymentAndInvoice(payment, {
+      status: "completed",
+      providerPaymentId: razorpayPaymentId,
+    });
+
+    return res.json({ success: true, data: payment });
+  } catch (error) {
+    console.error("Confirm gateway payment error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to confirm payment",
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
   }
 };
 

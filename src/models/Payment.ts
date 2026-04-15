@@ -8,6 +8,9 @@ export interface IPayment extends Document {
   clientName: string;
   clientEmail: string;
   amount: number;
+  currency: string;
+  provider?: "stripe" | "razorpay" | "manual";
+  providerPaymentId?: string;
   method: "card" | "bank" | "cash" | "crypto";
   status: "completed" | "pending" | "failed" | "refunded";
   transactionId: string;
@@ -26,6 +29,13 @@ const paymentSchema = new Schema<IPayment>(
     clientName: { type: String, required: true },
     clientEmail: { type: String, required: true },
     amount: { type: Number, required: true, min: 0 },
+    currency: { type: String, required: true, default: "USD" },
+    provider: {
+      type: String,
+      enum: ["stripe", "razorpay", "manual"],
+      default: "manual",
+    },
+    providerPaymentId: { type: String, default: "" },
     method: {
       type: String,
       enum: ["card", "bank", "cash", "crypto"],
