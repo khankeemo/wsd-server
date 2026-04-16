@@ -7,18 +7,16 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import User from "../models/User";
 import Notification from "../models/Notification";
-import { escapeHtml, getFrontendBaseUrl, sendEmail } from "../services/email.service";
+import { escapeHtml, sendEmail } from "../services/email.service";
 import {
   getPasswordValidationMessage,
   isStrongPassword,
   isValidEmail,
 } from "../utils/validation";
 
-const OTP_EXPIRY_MS = 10 * 60 * 1000;
-const VERIFIED_TOKEN_EXPIRY_MS = 15 * 60 * 1000;
-
-const hashValue = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
-const generateOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
+const OTP_EXPIRY_MINUTES = 10;
+const createOtp = () => `${Math.floor(100000 + Math.random() * 900000)}`;
+const hashOtp = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
 
 // REGISTER - Creates new user and returns token
 export const register = async (req: Request, res: Response) => {
@@ -161,11 +159,6 @@ export const changePassword = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const isSameAsCurrent = await bcrypt.compare(newPassword, user.password);
-    if (isSameAsCurrent) {
-      return res.status(400).json({ message: "New password cannot be the same as your temporary password" });
-    }
-
     const hashed = await bcrypt.hash(newPassword, 10);
     user.password = hashed;
     user.isTemporaryPassword = false;
@@ -203,37 +196,48 @@ export const requestForgotPasswordOtp = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Please enter a valid email address." });
     }
 
-    const user = await User.findOne({ email: normalizedEmail, role: "client" });
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
-      return res.json({ success: true, message: "If the account is eligible, an OTP has been sent." });
+      return res.status(404).json({ message: "User not found" });
     }
 
-    const otp = generateOtp();
-    user.passwordResetOtpHash = hashValue(otp);
-    user.passwordResetOtpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MS);
-    user.passwordResetVerifiedTokenHash = "";
-    user.passwordResetVerifiedTokenExpiresAt = null;
+    if (user.isOAuthUser) {
+      return res.status(400).json({ 
+        message: "This account is linked with Google. Please log in using the Google button." 
+      });
+    }
+
+    const otp = createOtp();
+    user.passwordResetOtpHash = hashOtp(otp);
+    user.passwordResetOtpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+    user.passwordResetOtpVerified = false;
     await user.save();
 
     await sendEmail(
       user.email,
-      "Your Websmith OTP for password reset",
-      `Hello ${user.name},\n\nYour OTP for password reset is: ${otp}\nThis OTP expires in 10 minutes.\n\nIf you did not request this, you can ignore this email.`,
+      "OTP for password reset",
+      `Hello ${user.name},\n\nYour OTP is ${otp}. It will expire in ${OTP_EXPIRY_MINUTES} minutes.`,
       `
         <div style="font-family: Arial, Helvetica, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e5e5ea; border-radius: 12px; background: #ffffff;">
-          <h2 style="color: #007AFF; margin-top: 0;">Password Reset OTP</h2>
+          <h2 style="color: #007AFF; margin-top: 0;">OTP Verification</h2>
           <p>Hello <strong>${escapeHtml(user.name)}</strong>,</p>
-          <p>Use this OTP to continue resetting your password:</p>
+          <p>Use this OTP to reset your password:</p>
           <p style="font-size: 28px; font-weight: 700; letter-spacing: 4px; margin: 16px 0; color: #111827;">${otp}</p>
-          <p style="font-size: 13px; color: #6b7280; margin: 0;">This OTP expires in 10 minutes.</p>
+          <p style="font-size: 13px; color: #6b7280;">This OTP expires in ${OTP_EXPIRY_MINUTES} minutes.</p>
         </div>
       `
     );
 
-    return res.json({ success: true, message: "If the account is eligible, an OTP has been sent." });
-  } catch (err) {
-    console.error("Request forgot password OTP error:", err);
-    return res.status(500).json({ message: "Failed to process forgot password request." });
+    return res.json({ success: true, message: "OTP has been sent to your registered email." });
+  } catch (err: any) {
+    console.error("Request forgot password OTP error details:", {
+      message: err.message,
+      stack: err.stack,
+      email: req.body?.email
+    });
+    return res.status(500).json({ 
+      message: "Failed to send OTP. This is likely an email service configuration issue. Please contact support." 
+    });
   }
 };
 
@@ -246,107 +250,77 @@ export const verifyForgotPasswordOtp = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "OTP is incorrect or expired. Please try again." });
     }
 
-    const user = await User.findOne({ email: normalizedEmail, role: "client" });
-    const otpHash = hashValue(otp);
-    const now = new Date();
-
+    const user = await User.findOne({ email: normalizedEmail });
     if (
       !user ||
       !user.passwordResetOtpHash ||
-      user.passwordResetOtpHash !== otpHash ||
+      user.passwordResetOtpHash !== hashOtp(otp) ||
       !user.passwordResetOtpExpiresAt ||
-      user.passwordResetOtpExpiresAt.getTime() < now.getTime()
+      user.passwordResetOtpExpiresAt.getTime() < Date.now()
     ) {
       return res.status(400).json({ message: "OTP is incorrect or expired. Please try again." });
     }
 
-    const verificationToken = crypto.randomBytes(24).toString("hex");
-    user.passwordResetVerifiedTokenHash = hashValue(verificationToken);
-    user.passwordResetVerifiedTokenExpiresAt = new Date(Date.now() + VERIFIED_TOKEN_EXPIRY_MS);
-    user.passwordResetOtpHash = "";
-    user.passwordResetOtpExpiresAt = null;
+    user.passwordResetOtpVerified = true;
     await user.save();
 
-    return res.json({
-      success: true,
-      message: "OTP verified successfully.",
-      verificationToken,
-    });
+    return res.json({ success: true, message: "OTP verified successfully." });
   } catch (err) {
     console.error("Verify forgot password OTP error:", err);
-    return res.status(500).json({ message: "Failed to verify OTP." });
+    return res.status(500).json({ message: "Failed to verify OTP. Please try again." });
   }
 };
 
-export const issueTemporaryPasswordAfterOtp = async (req: Request, res: Response) => {
+export const resetPasswordWithOtp = async (req: Request, res: Response) => {
   try {
     const normalizedEmail = String(req.body?.email || "").trim().toLowerCase();
-    const verificationToken = String(req.body?.verificationToken || "").trim();
+    const newPassword = String(req.body?.newPassword || "");
+    const confirmPassword = String(req.body?.confirmPassword || "");
 
-    if (!isValidEmail(normalizedEmail) || !verificationToken) {
-      return res.status(400).json({ message: "Invalid password reset request." });
+    if (!isValidEmail(normalizedEmail)) {
+      return res.status(400).json({ message: "Please enter a valid email address." });
     }
 
-    const user = await User.findOne({ email: normalizedEmail, role: "client" });
-    const now = new Date();
-    if (
-      !user ||
-      !user.passwordResetVerifiedTokenHash ||
-      user.passwordResetVerifiedTokenHash !== hashValue(verificationToken) ||
-      !user.passwordResetVerifiedTokenExpiresAt ||
-      user.passwordResetVerifiedTokenExpiresAt.getTime() < now.getTime()
-    ) {
-      return res.status(400).json({ message: "OTP verification is missing or expired. Please verify OTP again." });
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ message: "Passwords do not match." });
     }
 
-    const tempPassword = crypto.randomBytes(4).toString("hex");
-    user.password = await bcrypt.hash(tempPassword, 10);
-    user.isTemporaryPassword = true;
-    user.setupCompleted = false;
-    user.passwordResetVerifiedTokenHash = "";
-    user.passwordResetVerifiedTokenExpiresAt = null;
+    if (!isStrongPassword(newPassword)) {
+      return res.status(400).json({ message: getPasswordValidationMessage() });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(404).json({ message: "Email not found. Please register first." });
+    }
+
+    if (!user.passwordResetOtpVerified || !user.passwordResetOtpExpiresAt || user.passwordResetOtpExpiresAt.getTime() < Date.now()) {
+      return res.status(400).json({ message: "OTP is incorrect or expired. Please try again." });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.passwordResetOtpHash = "";
+    user.passwordResetOtpExpiresAt = null;
+    user.passwordResetOtpVerified = false;
+    user.isTemporaryPassword = false;
     await user.save();
 
-    const loginUrl = `${getFrontendBaseUrl()}/login`;
     await sendEmail(
       user.email,
-      "Your Websmith temporary login password",
-      `Hello ${user.name},
-
-Your temporary password has been issued after OTP verification.
-
-Client ID: ${user.customId || "N/A"}
-Temporary Password: ${tempPassword}
-
-Log in to dashboard: ${loginUrl}`,
+      "Password changed successfully",
+      `Hello ${user.name},\n\nYour password has been changed successfully.`,
       `
-        <div style="font-family: Arial, Helvetica, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e5e5ea; border-radius: 12px; background: #ffffff;">
-          <h2 style="color: #007AFF; margin-top: 0;">Temporary Password Issued</h2>
+        <div style="font-family: Arial, Helvetica, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e5e5ea; border-radius: 12px; background: #ffffff;">
+          <h2 style="color: #007AFF; margin-top: 0;">Password Updated</h2>
           <p>Hello <strong>${escapeHtml(user.name)}</strong>,</p>
-          <p>Your OTP is verified. Use the credentials below to sign in:</p>
-          <div style="background-color: #f2f2f7; padding: 16px; border-radius: 8px; margin: 16px 0;">
-            <p style="margin: 0 0 8px 0;"><strong>Client ID:</strong> ${escapeHtml(user.customId || "N/A")}</p>
-            <p style="margin: 0;"><strong>Temporary Password:</strong> <code style="background-color: #e5e5ea; padding: 2px 6px; border-radius: 4px;">${escapeHtml(tempPassword)}</code></p>
-          </div>
-          <p style="margin: 16px 0 10px 0;"><strong>Log in to your dashboard:</strong></p>
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin: 0 0 16px 0;">
-            <tr>
-              <td align="center" style="border-radius: 8px; background-color: #007AFF;">
-                <a href="${loginUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 12px 24px; color: #ffffff; text-decoration: none; font-weight: 600; border-radius: 8px;">Log in to dashboard</a>
-              </td>
-            </tr>
-          </table>
-          <p style="margin: 0; font-size: 13px; color: #5f6368;">For security, you must update this temporary password immediately after signing in.</p>
+          <p>Your password has been changed successfully.</p>
         </div>
       `
     );
 
-    return res.json({
-      success: true,
-      message: "Temporary password sent. Please sign in and update your password immediately.",
-    });
+    return res.json({ success: true, message: "Password updated successfully. You can now log in." });
   } catch (err) {
-    console.error("Issue temporary password after OTP error:", err);
-    return res.status(500).json({ message: "Failed to issue temporary password." });
+    console.error("Reset password with OTP error:", err);
+    return res.status(500).json({ message: "Failed to reset password. Please try again." });
   }
 };
