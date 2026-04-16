@@ -215,6 +215,11 @@ export class UserController {
         return;
       }
 
+      if (currentPassword === newPassword) {
+        res.status(400).json({ success: false, message: "New password must be different from your current password" });
+        return;
+      }
+
       user.password = await bcrypt.hash(newPassword, 10);
       user.isTemporaryPassword = false;
       await user.save();
