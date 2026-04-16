@@ -278,6 +278,12 @@ export const updateTask = async (req: Request, res: Response) => {
     if (role === "admin" && normalizedClientId.hasValue) task.clientId = normalizedClientId.value;
     if (role === "admin" && normalizedDeveloperId.hasValue) {
       task.developerId = normalizedDeveloperId.value;
+      if (normalizedDeveloperId.value) {
+        const developer = await User.findOne({ _id: normalizedDeveloperId.value, role: "developer" });
+        if (developer) task.assignee = developer.name;
+      } else {
+        task.assignee = "";
+      }
     }
     if (status) task.status = status;
     if (role === "admin" && priority) task.priority = priority;
@@ -380,6 +386,13 @@ export const bulkUpdateTaskStatus = async (req: Request, res: Response) => {
       if (!task) continue;
 
       if (update.status) {
+        if (
+          role === "developer" &&
+          !["pending", "in-progress", "completed"].includes(update.status)
+        ) {
+          results.push({ id: update.id, success: false, error: "Invalid status for developer role" });
+          continue;
+        }
         task.status = update.status;
         if (update.status === "completed" && !task.completedAt) {
           task.completedAt = new Date();

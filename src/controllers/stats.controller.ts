@@ -177,7 +177,7 @@ export const getDeveloperStats = async (req: Request, res: Response) => {
 
     // Fetch projects and tasks in parallel
     const [projects, tasks] = await Promise.all([
-      Project.find({ assignedDevId: userId }).select("name status progress endDate"),
+      Project.find({ assignedDevId: userId }).select("name status progress endDate updatedAt createdAt"),
       Task.find({ developerId: userId }).select("title status priority dueDate projectId createdAt").populate("projectId", "name status")
     ]);
 
@@ -209,7 +209,9 @@ export const getDeveloperStats = async (req: Request, res: Response) => {
       return new Date(t.dueDate) < now;
     });
 
-    // Generate recent activity
+    const activityTime = (d: Date | undefined) => (d ? new Date(d).getTime() : 0);
+
+    // Generate recent activity (timestamps must be safe — Project select previously omitted updatedAt and caused 500s)
     const recentActivity = [
       ...projects.map(project => ({
         id: String(project._id),
@@ -224,7 +226,7 @@ export const getDeveloperStats = async (req: Request, res: Response) => {
         timestamp: task.createdAt
       }))
     ]
-      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+      .sort((a, b) => activityTime(b.timestamp) - activityTime(a.timestamp))
       .slice(0, 10);
 
     const stats = {
