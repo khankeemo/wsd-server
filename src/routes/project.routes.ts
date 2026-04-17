@@ -20,14 +20,17 @@ import {
   getMessages,
   addFeedback,
   getFeedback,
+  toggleFeedbackTestimonial,
   updateCustomization,
   bulkUpdateProjectStatus,
-  togglePublish
+  togglePublish,
+  getPublishedTestimonials
 } from "../controllers/project.controller";
 
 const router = express.Router();
 
 router.get("/public", getPublishedProjects);
+router.get("/public/testimonials", getPublishedTestimonials);
 
 // All project routes require authentication
 router.use(authMiddleware);
@@ -86,6 +89,9 @@ router.post("/:id/feedback", addFeedback);
 
 // GET /api/projects/:id/feedback - Get all feedback for a project
 router.get("/:id/feedback", getFeedback);
+
+// PATCH /api/projects/:id/feedback/:feedbackId/testimonial - Publish/unpublish feedback as testimonial
+router.patch("/:id/feedback/:feedbackId/testimonial", toggleFeedbackTestimonial);
 
 // ============================================================
 // CUSTOMIZATION ROUTES (Card #7)

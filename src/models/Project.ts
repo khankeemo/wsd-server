@@ -20,6 +20,8 @@ export interface IFeedback {
   comment: string;
   date: Date;
   clientName: string;
+  publishedAsTestimonial: boolean;
+  testimonialPublishedAt?: Date | null;
 }
 
 // Interface for Customization sub-document
@@ -106,7 +108,9 @@ const feedbackSchema = new Schema<IFeedback>({
   rating: { type: Number, min: 1, max: 5, default: 5 },
   comment: { type: String, default: "" },
   date: { type: Date, default: Date.now },
-  clientName: { type: String, default: "" }
+  clientName: { type: String, default: "" },
+  publishedAsTestimonial: { type: Boolean, default: false },
+  testimonialPublishedAt: { type: Date, default: null }
 });
 
 // Customization Schema

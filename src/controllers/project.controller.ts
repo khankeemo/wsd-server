@@ -10,6 +10,8 @@ import Ticket from "../models/Ticket";
 import User from "../models/User";
 import Notification from "../models/Notification";
 
+const PROJECT_STATUSES = ["pending", "in-progress", "completed", "on-hold"] as const;
+
 // Helper to get userId from request (set by auth middleware)
 const getUserId = (req: Request): string | undefined => {
   return (req as any).userId || (req as any).user?.id;
@@ -103,6 +105,32 @@ const createClientAssignmentNotification = async (project: any) => {
     type: hasDeveloper ? "project_assignment_assigned" : "project_assignment_unassigned",
     message,
   });
+};
+
+const syncCompletionState = (project: any) => {
+  if (project.status === "completed") {
+    project.progress = 100;
+    project.completedAt = project.completedAt || new Date();
+    return;
+  }
+
+  project.completedAt = null;
+};
+
+const syncTicketArchiveForProject = async (project: any) => {
+  if (project.status === "completed" && project.completedAt) {
+    await Ticket.updateMany(
+      { projectId: project._id },
+      {
+        $set: {
+          archiveAfter: new Date(project.completedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+        },
+      }
+    );
+    return;
+  }
+
+  await Ticket.updateMany({ projectId: project._id }, { $set: { archiveAfter: null } });
 };
 
 // ============================================================
@@ -287,7 +315,12 @@ export const updateProject = async (req: Request, res: Response) => {
     if (clientCompany !== undefined) project.clientCompany = clientCompany;
     if (publicUrl !== undefined) project.publicUrl = publicUrl;
     if (previewImage !== undefined) project.previewImage = previewImage;
-    if (status) project.status = status;
+    if (status) {
+      if (!PROJECT_STATUSES.includes(status)) {
+        return res.status(400).json({ message: "Invalid project status" });
+      }
+      project.status = status;
+    }
     if (priority) project.priority = priority;
     if (projectType) project.projectType = projectType;
     if (startDate) project.startDate = new Date(startDate);
@@ -297,12 +330,7 @@ export const updateProject = async (req: Request, res: Response) => {
     }
     if (budget !== undefined) project.budget = budget;
     if (published !== undefined) project.published = Boolean(published);
-    if (project.status === "completed" && !project.completedAt) {
-      project.completedAt = new Date();
-    }
-    if (project.status !== "completed") {
-      project.completedAt = null;
-    }
+    syncCompletionState(project);
     if (req.body.sharedFiles !== undefined) {
       project.sharedFiles = sanitizeSharedFiles(req.body.sharedFiles, userId) as any;
     }
@@ -315,18 +343,7 @@ export const updateProject = async (req: Request, res: Response) => {
 
     await project.save();
 
-    if (project.status === "completed" && project.completedAt) {
-      await Ticket.updateMany(
-        { projectId: project._id },
-        {
-          $set: {
-            archiveAfter: new Date(project.completedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
-          },
-        }
-      );
-    } else {
-      await Ticket.updateMany({ projectId: project._id }, { $set: { archiveAfter: null } });
-    }
+    await syncTicketArchiveForProject(project);
 
     await project.populate("clientId", "name email");
     await project.populate("assignedDevId", "name email");
@@ -410,6 +427,7 @@ export const updateProgress = async (req: Request, res: Response) => {
     } else if (progress > 0 && project.status === "pending") {
       project.status = "in-progress";
     }
+    syncCompletionState(project);
     
     project.activityLog.push({
       action: `Progress updated to ${progress}%`,
@@ -426,6 +444,7 @@ export const updateProgress = async (req: Request, res: Response) => {
     });
 
     await project.save();
+    await syncTicketArchiveForProject(project);
 
     await project.populate("clientId", "name email");
     await project.populate("assignedDevId", "name email");
@@ -504,6 +523,7 @@ export const getMessages = async (req: Request, res: Response) => {
 export const addFeedback = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
+    const role = (req as any).user?.role;
     const { id } = req.params;
     const { rating, comment, clientName } = req.body;
 
@@ -515,16 +535,26 @@ export const addFeedback = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Rating must be between 1 and 5" });
     }
 
+    if (role !== "client") {
+      return res.status(403).json({ message: "Only clients can submit project feedback" });
+    }
+
     const project = await findAccessibleProject(req, id);
     if (!project) {
       return res.status(404).json({ message: "Project not found" });
+    }
+
+    if (project.status !== "completed") {
+      return res.status(403).json({ message: "Feedback is available after the project is completed" });
     }
 
     project.feedback.push({
       rating,
       comment: comment || "",
       date: new Date(),
-      clientName: clientName || project.client
+      clientName: clientName || project.client,
+      publishedAsTestimonial: false,
+      testimonialPublishedAt: null,
     });
 
     await project.save();
@@ -540,6 +570,7 @@ export const addFeedback = async (req: Request, res: Response) => {
 export const getFeedback = async (req: Request, res: Response) => {
   try {
     const userId = getUserId(req);
+    const role = (req as any).user?.role;
     const { id } = req.params;
 
     if (!userId) {
@@ -549,6 +580,10 @@ export const getFeedback = async (req: Request, res: Response) => {
     const project = await findAccessibleProject(req, id);
     if (!project) {
       return res.status(404).json({ message: "Project not found" });
+    }
+
+    if (role === "client" && project.status !== "completed") {
+      return res.status(403).json({ message: "Feedback is available after the project is completed" });
     }
 
     res.json({ success: true, data: project.feedback });
@@ -580,6 +615,9 @@ export const updateProjectStatus = async (req: Request, res: Response) => {
     }
 
     if (status) {
+      if (!PROJECT_STATUSES.includes(status)) {
+        return res.status(400).json({ message: "Invalid project status" });
+      }
       project.status = status;
     }
 
@@ -591,7 +629,7 @@ export const updateProjectStatus = async (req: Request, res: Response) => {
       project.progress = 25;
     }
 
-    project.completedAt = project.status === "completed" ? project.completedAt || new Date() : null;
+    syncCompletionState(project);
 
     project.statusUpdates.push({
       status: project.status,
@@ -608,19 +646,7 @@ export const updateProjectStatus = async (req: Request, res: Response) => {
     });
 
     await project.save();
-
-    if (project.status === "completed" && project.completedAt) {
-      await Ticket.updateMany(
-        { projectId: project._id },
-        {
-          $set: {
-            archiveAfter: new Date(project.completedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
-          },
-        }
-      );
-    } else {
-      await Ticket.updateMany({ projectId: project._id }, { $set: { archiveAfter: null } });
-    }
+    await syncTicketArchiveForProject(project);
 
     const recipients = [project.clientId, project.assignedDevId].filter(Boolean);
     if (recipients.length > 0) {
@@ -772,6 +798,74 @@ export const getAllProjectsStatus = async (req: Request, res: Response) => {
   }
 };
 
+export const toggleFeedbackTestimonial = async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const role = (req as any).user?.role;
+    const { id, feedbackId } = req.params;
+    const { published } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    if (role !== "admin") {
+      return res.status(403).json({ success: false, message: "Only admins can publish testimonials" });
+    }
+
+    const project = await Project.findOne({ _id: id, userId });
+    if (!project) {
+      return res.status(404).json({ success: false, message: "Project not found" });
+    }
+
+    const feedback = (project.feedback as any).id(feedbackId);
+    if (!feedback) {
+      return res.status(404).json({ success: false, message: "Feedback not found" });
+    }
+
+    feedback.publishedAsTestimonial = Boolean(published);
+    feedback.testimonialPublishedAt = published ? new Date() : null;
+    await project.save();
+
+    res.json({ success: true, data: project.feedback });
+  } catch (error) {
+    console.error("Toggle feedback testimonial error:", error);
+    res.status(500).json({ success: false, message: "Failed to update testimonial status" });
+  }
+};
+
+export const getPublishedTestimonials = async (_req: Request, res: Response) => {
+  try {
+    const projects = await Project.find({
+      "feedback.publishedAsTestimonial": true,
+      status: "completed",
+    })
+      .select("name client clientEmail clientCompany feedback")
+      .sort({ updatedAt: -1 });
+
+    const testimonials = projects.flatMap((project: any) =>
+      project.feedback
+        .filter((item: any) => item.publishedAsTestimonial)
+        .map((item: any) => ({
+          id: String(item._id),
+          projectId: String(project._id),
+          projectName: project.name,
+          name: item.clientName || project.client,
+          email: project.clientEmail || "",
+          company: project.clientCompany || project.client,
+          quote: item.comment,
+          rating: item.rating,
+          date: item.date,
+        }))
+    );
+
+    res.json({ success: true, data: testimonials });
+  } catch (error) {
+    console.error("Get published testimonials error:", error);
+    res.status(500).json({ success: false, message: "Failed to fetch testimonials" });
+  }
+};
+
 export const getPublishedProjects = async (_req: Request, res: Response) => {
   try {
     const projects = await Project.find({ published: true, status: { $ne: "on-hold" } })
@@ -811,11 +905,15 @@ export const bulkUpdateProjectStatus = async (req: Request, res: Response) => {
       if (!project) continue;
 
       if (update.status) {
+        if (!PROJECT_STATUSES.includes(update.status)) {
+          continue;
+        }
         project.status = update.status;
       }
       if (typeof update.progress === "number") {
         project.progress = update.progress;
       }
+      syncCompletionState(project);
 
       project.statusUpdates.push({
         status: project.status,
@@ -826,6 +924,7 @@ export const bulkUpdateProjectStatus = async (req: Request, res: Response) => {
       });
 
       await project.save();
+      await syncTicketArchiveForProject(project);
       results.push({ id: update.id, success: true });
     }
 
