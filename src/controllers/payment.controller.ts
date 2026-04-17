@@ -139,6 +139,60 @@ const normalizeProviderCurrency = (provider: PaymentProvider, currency?: string)
   return (currency || fallback).toUpperCase();
 };
 
+const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
+
+const isLocalhostLikeUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+  } catch {
+    return false;
+  }
+};
+
+const resolveFrontendBaseUrl = (req: Request, requestedFrontendBaseUrl?: string) => {
+  const normalizedRequested = String(requestedFrontendBaseUrl || "").trim();
+  const explicitFrontendUrl = String(process.env.FRONTEND_URL || "").trim();
+  const originHeader = String(req.headers.origin || "").trim();
+  const refererHeader = String(req.headers.referer || "").trim();
+  const vercelUrl = String(process.env.VERCEL_URL || "").trim();
+
+  const normalizedRequestedUrl = normalizedRequested ? trimTrailingSlash(normalizedRequested) : "";
+  const normalizedExplicit = explicitFrontendUrl ? trimTrailingSlash(explicitFrontendUrl) : "";
+  const normalizedOrigin = originHeader ? trimTrailingSlash(originHeader) : "";
+  const normalizedVercel = vercelUrl ? trimTrailingSlash(`https://${vercelUrl}`) : "";
+
+  if (normalizedRequestedUrl && (!isLocalhostLikeUrl(normalizedRequestedUrl) || process.env.NODE_ENV !== "production")) {
+    return normalizedRequestedUrl;
+  }
+
+  // In production, avoid localhost callback URLs even if FRONTEND_URL was misconfigured.
+  if (normalizedExplicit && (!isLocalhostLikeUrl(normalizedExplicit) || process.env.NODE_ENV !== "production")) {
+    return normalizedExplicit;
+  }
+
+  if (normalizedOrigin && !isLocalhostLikeUrl(normalizedOrigin)) {
+    return normalizedOrigin;
+  }
+
+  if (refererHeader) {
+    try {
+      const refererOrigin = trimTrailingSlash(new URL(refererHeader).origin);
+      if (!isLocalhostLikeUrl(refererOrigin)) {
+        return refererOrigin;
+      }
+    } catch {
+      // Ignore invalid referer header.
+    }
+  }
+
+  if (normalizedVercel && !isLocalhostLikeUrl(normalizedVercel)) {
+    return normalizedVercel;
+  }
+
+  return normalizedExplicit || normalizedOrigin || normalizedVercel || "http://localhost:3000";
+};
+
 const buildStandalonePaymentReference = () => `PAY-${Date.now()}`;
 
 const createPendingPaymentRecord = async ({
@@ -226,7 +280,7 @@ export const createGatewayPayment = async (req: Request, res: Response) => {
     const userId = (req as any).userId;
     if (!user || !userId) return res.status(401).json({ success: false, message: "Unauthorized" });
 
-    const { provider: rawProvider, invoiceId, notes, amount: rawAmount, currency } = req.body;
+    const { provider: rawProvider, invoiceId, notes, amount: rawAmount, currency, frontendBaseUrl } = req.body;
     const provider = normalizeProvider(rawProvider);
 
     if (!provider) {
@@ -309,7 +363,7 @@ export const createGatewayPayment = async (req: Request, res: Response) => {
       invoiceNumber: payment.invoiceNumber,
     });
 
-    const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/$/, "");
+    const frontendUrl = resolveFrontendBaseUrl(req, frontendBaseUrl);
     const providerResponse = await createProviderPayment({
       provider,
       amount: payment.amount,
@@ -697,6 +751,21 @@ const reconcileGatewayPayment = async (payment: any) => {
         paymentId: payment._id.toString(),
         status: "completed",
         providerPaymentId: capturedPayment.id || payment.providerPaymentId,
+      });
+      return Payment.findById(payment._id);
+    }
+  }
+
+  const pendingTimeoutMinutes = Number(process.env.GATEWAY_PENDING_TIMEOUT_MINUTES || 20);
+  const pendingSinceMs = Date.now() - new Date(payment.createdAt || payment.date || Date.now()).getTime();
+  if (Number.isFinite(pendingTimeoutMinutes) && pendingTimeoutMinutes > 0) {
+    const timeoutMs = pendingTimeoutMinutes * 60 * 1000;
+    if (pendingSinceMs >= timeoutMs) {
+      await updatePaymentByWebhook({
+        paymentId: payment._id.toString(),
+        status: "failed",
+        providerPaymentId: payment.providerPaymentId || null,
+        failureReason: "Payment verification timed out. Please retry.",
       });
       return Payment.findById(payment._id);
     }
