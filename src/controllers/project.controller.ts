@@ -548,6 +548,10 @@ export const addFeedback = async (req: Request, res: Response) => {
       return res.status(403).json({ message: "Feedback is available after the project is completed" });
     }
 
+    if (project.feedback.length > 0) {
+      return res.status(409).json({ message: "Feedback has already been submitted for this project" });
+    }
+
     project.feedback.push({
       rating,
       comment: comment || "",
@@ -590,6 +594,40 @@ export const getFeedback = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Get feedback error:", error);
     res.status(500).json({ message: "Failed to get feedback" });
+  }
+};
+
+export const deleteFeedback = async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    const role = (req as any).user?.role;
+    const { id, feedbackId } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    if (role !== "admin") {
+      return res.status(403).json({ success: false, message: "Only admins can delete feedback" });
+    }
+
+    const project = await Project.findOne({ _id: id, userId });
+    if (!project) {
+      return res.status(404).json({ success: false, message: "Project not found" });
+    }
+
+    const feedback = (project.feedback as any).id(feedbackId);
+    if (!feedback) {
+      return res.status(404).json({ success: false, message: "Feedback not found" });
+    }
+
+    feedback.deleteOne();
+    await project.save();
+
+    res.json({ success: true, data: project.feedback });
+  } catch (error) {
+    console.error("Delete feedback error:", error);
+    res.status(500).json({ success: false, message: "Failed to delete feedback" });
   }
 };
 

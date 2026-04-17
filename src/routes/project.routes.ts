@@ -20,6 +20,7 @@ import {
   getMessages,
   addFeedback,
   getFeedback,
+  deleteFeedback,
   toggleFeedbackTestimonial,
   updateCustomization,
   bulkUpdateProjectStatus,
@@ -89,6 +90,9 @@ router.post("/:id/feedback", addFeedback);
 
 // GET /api/projects/:id/feedback - Get all feedback for a project
 router.get("/:id/feedback", getFeedback);
+
+// DELETE /api/projects/:id/feedback/:feedbackId - Delete feedback
+router.delete("/:id/feedback/:feedbackId", deleteFeedback);
 
 // PATCH /api/projects/:id/feedback/:feedbackId/testimonial - Publish/unpublish feedback as testimonial
 router.patch("/:id/feedback/:feedbackId/testimonial", toggleFeedbackTestimonial);
