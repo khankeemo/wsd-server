@@ -191,6 +191,10 @@ export const changePassword = async (req: Request, res: Response) => {
 export const requestForgotPasswordOtp = async (req: Request, res: Response) => {
   try {
     const normalizedEmail = String(req.body?.email || "").trim().toLowerCase();
+    const genericSuccess = {
+      success: true,
+      message: "If the account is eligible, an OTP has been sent to the registered email.",
+    };
 
     if (!isValidEmail(normalizedEmail)) {
       return res.status(400).json({ message: "Please enter a valid email address." });
@@ -198,13 +202,11 @@ export const requestForgotPasswordOtp = async (req: Request, res: Response) => {
 
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      return res.json(genericSuccess);
     }
 
     if (user.isOAuthUser) {
-      return res.status(400).json({ 
-        message: "This account is linked with Google. Please log in using the Google button." 
-      });
+      return res.json(genericSuccess);
     }
 
     const otp = createOtp();
@@ -228,7 +230,7 @@ export const requestForgotPasswordOtp = async (req: Request, res: Response) => {
       `
     );
 
-    return res.json({ success: true, message: "OTP has been sent to your registered email." });
+    return res.json(genericSuccess);
   } catch (err: any) {
     console.error("Request forgot password OTP error details:", {
       message: err.message,
