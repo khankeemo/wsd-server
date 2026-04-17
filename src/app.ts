@@ -74,6 +74,9 @@ app.use(async (_req, _res, next) => {
   }
 });
 
+const ticketUploadsDir = path.join(process.cwd(), "uploads", "tickets");
+app.use("/api/uploads/tickets", express.static(ticketUploadsDir));
+
 // API routes
 app.get("/", (req, res) => res.send("OK"));
 app.use("/api", routes);

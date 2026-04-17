@@ -55,6 +55,15 @@ export const createTicket = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "Subject and description are required" });
     }
 
+    const parsedAttachments = Array.isArray(attachments)
+      ? attachments
+          .map((item: any) => ({
+            name: String(item?.name || "").trim(),
+            url: String(item?.url || "").trim(),
+          }))
+          .filter((item: { name: string; url: string }) => item.name && item.url)
+      : [];
+
     let project = null;
     if (projectId) {
       project = await Project.findOne({ _id: projectId, clientId: userId });
@@ -75,14 +84,7 @@ export const createTicket = async (req: Request, res: Response) => {
       subject,
       description,
       priority: priority || "medium",
-      attachments: Array.isArray(attachments)
-        ? attachments
-            .map((item: any) => ({
-              name: String(item?.name || "").trim(),
-              url: String(item?.url || "").trim(),
-            }))
-            .filter((item) => item.name && item.url)
-        : [],
+      attachments: parsedAttachments,
       status: "open",
       history: [
         {
@@ -90,6 +92,7 @@ export const createTicket = async (req: Request, res: Response) => {
           actorId: userId,
           actorRole: "client",
           message: description,
+          attachments: parsedAttachments.length ? parsedAttachments : undefined,
           createdAt: new Date(),
         },
       ],
@@ -312,19 +315,57 @@ export const deleteTicket = async (req: Request, res: Response) => {
   }
 };
 
+export const uploadTicketImage = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    const userId = (req as any).userId;
+
+    if (!user || !userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    if (!["admin", "developer", "client"].includes(user.role)) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+
+    const url = `/api/uploads/tickets/${file.filename}`;
+    return res.status(200).json({
+      success: true,
+      data: { url, name: file.originalname, type: file.mimetype },
+    });
+  } catch (error) {
+    console.error("Upload ticket image error:", error);
+    return res.status(500).json({ success: false, message: "Failed to upload file" });
+  }
+};
+
 export const addTicketReply = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const userId = (req as any).userId;
     const { id } = req.params;
     const message = String(req.body.message || "").trim();
+    const rawAttachments = req.body.attachments;
+    const attachments = Array.isArray(rawAttachments)
+      ? rawAttachments
+          .map((item: any) => ({
+            name: String(item?.name || "").trim(),
+            url: String(item?.url || "").trim(),
+          }))
+          .filter((item: { name: string; url: string }) => item.name && item.url)
+      : [];
 
     if (!user || !userId) {
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    if (!message) {
-      return res.status(400).json({ success: false, message: "Reply message is required" });
+    if (!message && attachments.length === 0) {
+      return res.status(400).json({ success: false, message: "Reply text or at least one image is required" });
     }
 
     const scope =
@@ -347,7 +388,8 @@ export const addTicketReply = async (req: Request, res: Response) => {
       action: "reply",
       actorId: userId,
       actorRole: user.role,
-      message,
+      message: message || "",
+      attachments: attachments.length ? attachments : undefined,
       createdAt: new Date(),
     } as any);
 
@@ -358,12 +400,13 @@ export const addTicketReply = async (req: Request, res: Response) => {
     await ticket.save();
 
     if (ticket.clientId && user.role !== "client" && (await isQueryNotificationEnabled(ticket.clientId))) {
+      const replyPreview = message || (attachments.length ? "New reply with an attachment" : "");
       await Notification.create({
         recipientId: ticket.clientId,
         senderId: userId,
         type: "query_updated",
         message: `${ticket.subject} has a new reply`,
-        metadata: { ticketId: ticket._id, status: ticket.status, reply: message },
+        metadata: { ticketId: ticket._id, status: ticket.status, reply: replyPreview },
       });
     }
 

@@ -26,6 +26,7 @@ export interface ITicket extends Document {
     actorId?: mongoose.Types.ObjectId | null;
     actorRole: "admin" | "client" | "developer" | "system";
     message?: string;
+    attachments?: Array<{ name: string; url: string }>;
     createdAt: Date;
   }>;
   createdAt: Date;
@@ -91,6 +92,18 @@ const ticketSchema = new Schema<ITicket>(
               default: "system",
             },
             message: { type: String, default: "" },
+            attachments: {
+              type: [
+                new Schema(
+                  {
+                    name: { type: String, required: true, trim: true },
+                    url: { type: String, required: true, trim: true },
+                  },
+                  { _id: false }
+                ),
+              ],
+              default: undefined,
+            },
             createdAt: { type: Date, default: Date.now },
           },
           { _id: true }
