@@ -3,6 +3,7 @@
 // Features: Create, Read, Update, Delete with user authentication
 
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import { Client } from "../models/Client";
@@ -81,8 +82,12 @@ export const getClients = async (req: Request, res: Response) => {
     const clients = await Client.find(buildAdminOwnershipQuery(adminId)).sort({ createdAt: -1 });
     
     res.json({ success: true, data: clients });
-  } catch (error) {
-    console.error("Get clients error:", error);
+  } catch (error: any) {
+    console.error("GET_CLIENTS_CRASH:", {
+      message: error.message,
+      stack: error.stack,
+      dbState: mongoose.connection.readyState
+    });
     res.status(500).json({ message: "Failed to fetch clients" });
   }
 };

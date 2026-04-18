@@ -4,6 +4,7 @@
 // ADDED: Status dashboard methods (progress, messages, feedback, customization)
 
 import { Request, Response } from "express";
+import mongoose from "mongoose";
 import { Project } from "../models/Project";
 import { Task } from "../models/Task";
 import Ticket from "../models/Ticket";
@@ -881,8 +882,9 @@ export const getPublishedTestimonials = async (_req: Request, res: Response) => 
       .select("name client clientEmail clientCompany feedback")
       .sort({ updatedAt: -1 });
 
-    const testimonials = projects.flatMap((project: any) =>
-      project.feedback
+    const testimonials = projects.flatMap((project: any) => {
+      if (!project.feedback) return [];
+      return project.feedback
         .filter((item: any) => item.publishedAsTestimonial)
         .map((item: any) => ({
           id: String(item._id),
@@ -894,12 +896,16 @@ export const getPublishedTestimonials = async (_req: Request, res: Response) => 
           quote: item.comment,
           rating: item.rating,
           date: item.date,
-        }))
-    );
+        }));
+    });
 
     res.json({ success: true, data: testimonials });
-  } catch (error) {
-    console.error("Get published testimonials error:", error);
+  } catch (error: any) {
+    console.error("GET_PUBLISHED_TESTIMONIALS_CRASH:", {
+      message: error.message,
+      stack: error.stack,
+      dbState: mongoose.connection.readyState
+    });
     res.status(500).json({ success: false, message: "Failed to fetch testimonials" });
   }
 };
@@ -912,8 +918,12 @@ export const getPublishedProjects = async (_req: Request, res: Response) => {
       .limit(12);
 
     res.json({ success: true, data: projects });
-  } catch (error) {
-    console.error("Get published projects error:", error);
+  } catch (error: any) {
+    console.error("GET_PUBLISHED_PROJECTS_CRASH:", {
+      message: error.message,
+      stack: error.stack,
+      dbState: mongoose.connection.readyState
+    });
     res.status(500).json({ message: "Failed to fetch public projects" });
   }
 };
