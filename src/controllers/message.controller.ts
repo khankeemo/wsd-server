@@ -168,9 +168,29 @@ export const postTypingStub = async (_req: Request, res: Response) => {
   res.status(200).json({ success: true });
 };
 
-export const postUploadStub = async (_req: Request, res: Response) => {
-  res.status(501).json({
-    success: false,
-    message: "File attachments for chat are not configured on this server yet.",
-  });
+export const postUploadMessageFile = async (req: Request, res: Response) => {
+  try {
+    const uid = userId(req);
+    if (!uid) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    const file = (req as any).file as Express.Multer.File | undefined;
+    if (!file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+
+    const type = file.mimetype.startsWith("image/") ? "image" : "file";
+    return res.status(200).json({
+      success: true,
+      data: {
+        url: `/api/uploads/messages/${file.filename}`,
+        type,
+        name: file.originalname,
+      },
+    });
+  } catch (error) {
+    console.error("postUploadMessageFile error:", error);
+    return res.status(500).json({ success: false, message: "Failed to upload attachment" });
+  }
 };

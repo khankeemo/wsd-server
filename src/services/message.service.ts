@@ -26,6 +26,18 @@ export const formatMessageDoc = (doc: any, userId: string) => ({
   readAt: doc.readAt ? new Date(doc.readAt).toISOString() : undefined,
 });
 
+const conversationPreview = (doc: any) => {
+  if (doc.type === "image") {
+    return "Image attachment";
+  }
+
+  if (doc.type === "file") {
+    return "File attachment";
+  }
+
+  return String(doc.content || "").slice(0, 120);
+};
+
 export async function listConversations(userId: string) {
   const uid = new mongoose.Types.ObjectId(userId);
   const rows = await DirectMessage.find({
@@ -58,7 +70,7 @@ export async function listConversations(userId: string) {
     const peerObj = typeof peerUser === "object" && peerUser ? peerUser : null;
     const name = (peerObj as any)?.name || "Unknown user";
     const role = (peerObj as any)?.role as string | undefined;
-    const preview = String(last.content || "").slice(0, 120);
+    const preview = conversationPreview(last);
     const ts = last.createdAt ? new Date(last.createdAt).toISOString() : new Date().toISOString();
 
     conversations.push({
