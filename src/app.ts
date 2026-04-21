@@ -18,6 +18,8 @@ connectDB().catch((error) => {
 const defaultAllowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
+  "https://websmithdigital.com",
+  "https://www.websmithdigital.com",
   "https://websmith-z.vercel.app",
   "https://websmith-khankeemos-projects.vercel.app",
   "https://websmith-git-main-khankeemos-projects.vercel.app",
