@@ -16,13 +16,9 @@ connectDB().catch((error) => {
 });
 
 const defaultAllowedOrigins = [
-  "http://localhost:3000",
   "http://127.0.0.1:3000",
   "https://websmithdigital.com",
   "https://www.websmithdigital.com",
-  "https://websmith-z.vercel.app",
-  "https://websmith-khankeemos-projects.vercel.app",
-  "https://websmith-git-main-khankeemos-projects.vercel.app",
 ];
 
 const configuredOrigins = process.env.ALLOWED_ORIGINS
@@ -38,10 +34,10 @@ const isAllowedOrigin = (origin: string) => {
 
   try {
     const { hostname } = new URL(origin);
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
+    if (process.env.NODE_ENV !== "production" && hostname === "127.0.0.1") {
       return true;
     }
-    return hostname.endsWith(".vercel.app");
+    return false;
   } catch {
     return false;
   }

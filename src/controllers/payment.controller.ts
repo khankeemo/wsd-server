@@ -139,12 +139,14 @@ const normalizeProviderCurrency = (provider: PaymentProvider, currency?: string)
   return (currency || fallback).toUpperCase();
 };
 
+const PROD_FRONTEND_URL = "https://websmithdigital.com";
+
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, "");
 
-const isLocalhostLikeUrl = (value: string) => {
+const isLoopbackUrl = (value: string) => {
   try {
     const parsed = new URL(value);
-    return parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1";
+    return parsed.hostname === "127.0.0.1";
   } catch {
     return false;
   }
@@ -155,30 +157,27 @@ const resolveFrontendBaseUrl = (req: Request, requestedFrontendBaseUrl?: string)
   const explicitFrontendUrl = String(process.env.FRONTEND_URL || "").trim();
   const originHeader = String(req.headers.origin || "").trim();
   const refererHeader = String(req.headers.referer || "").trim();
-  const vercelUrl = String(process.env.VERCEL_URL || "").trim();
 
   const normalizedRequestedUrl = normalizedRequested ? trimTrailingSlash(normalizedRequested) : "";
-  const normalizedExplicit = explicitFrontendUrl ? trimTrailingSlash(explicitFrontendUrl) : "";
+  const normalizedExplicit = trimTrailingSlash(explicitFrontendUrl || PROD_FRONTEND_URL);
   const normalizedOrigin = originHeader ? trimTrailingSlash(originHeader) : "";
-  const normalizedVercel = vercelUrl ? trimTrailingSlash(`https://${vercelUrl}`) : "";
 
-  if (normalizedRequestedUrl && (!isLocalhostLikeUrl(normalizedRequestedUrl) || process.env.NODE_ENV !== "production")) {
+  if (normalizedRequestedUrl && (!isLoopbackUrl(normalizedRequestedUrl) || process.env.NODE_ENV !== "production")) {
     return normalizedRequestedUrl;
   }
 
-  // In production, avoid localhost callback URLs even if FRONTEND_URL was misconfigured.
-  if (normalizedExplicit && (!isLocalhostLikeUrl(normalizedExplicit) || process.env.NODE_ENV !== "production")) {
+  if (normalizedExplicit && (!isLoopbackUrl(normalizedExplicit) || process.env.NODE_ENV !== "production")) {
     return normalizedExplicit;
   }
 
-  if (normalizedOrigin && !isLocalhostLikeUrl(normalizedOrigin)) {
+  if (normalizedOrigin && !isLoopbackUrl(normalizedOrigin)) {
     return normalizedOrigin;
   }
 
   if (refererHeader) {
     try {
       const refererOrigin = trimTrailingSlash(new URL(refererHeader).origin);
-      if (!isLocalhostLikeUrl(refererOrigin)) {
+      if (!isLoopbackUrl(refererOrigin)) {
         return refererOrigin;
       }
     } catch {
@@ -186,11 +185,7 @@ const resolveFrontendBaseUrl = (req: Request, requestedFrontendBaseUrl?: string)
     }
   }
 
-  if (normalizedVercel && !isLocalhostLikeUrl(normalizedVercel)) {
-    return normalizedVercel;
-  }
-
-  return normalizedExplicit || normalizedOrigin || normalizedVercel || "http://localhost:3000";
+  return normalizedExplicit;
 };
 
 const buildStandalonePaymentReference = () => `PAY-${Date.now()}`;

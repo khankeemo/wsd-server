@@ -72,11 +72,13 @@ export const escapeHtml = (value: string) => {
     .replace(/'/g, "&#039;");
 };
 
+const PROD_FRONTEND_URL = "https://websmithdigital.com";
+
 export const getFrontendBaseUrl = () => {
   return (
     process.env.FRONTEND_URL ||
     process.env.APP_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
-    "https://websmith-z.vercel.app"
+    PROD_FRONTEND_URL
   ).replace(/\/$/, "");
 };
