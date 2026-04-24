@@ -1,10 +1,15 @@
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
-import { connectDB } from "../config/dbConnection";
-import User from "../models/User";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { connectDB } from "../config/dbConnection.ts";
+import User from "../models/User.ts";
 
-dotenv.config();
+const currentFilePath = fileURLToPath(import.meta.url);
+const currentDir = path.dirname(currentFilePath);
+
+dotenv.config({ path: path.resolve(currentDir, "../../.env") });
 
 type SeedUser = {
   name: string;
@@ -19,7 +24,7 @@ type SeedUser = {
 const seedUsers: SeedUser[] = [
   {
     name: "Admin User",
-    email: process.env.SEED_ADMIN_EMAIL || "admin@wsd.com",
+    email: process.env.SEED_ADMIN_EMAIL || "digitalwebsmith@gmail.com",
     password: process.env.SEED_ADMIN_PASSWORD || "admin123",
     role: "admin",
     adminLevel: "super",
@@ -27,14 +32,14 @@ const seedUsers: SeedUser[] = [
   },
   {
     name: "Client User",
-    email: process.env.SEED_CLIENT_EMAIL || "client@wsd.com",
+    email: process.env.SEED_CLIENT_EMAIL || "digitalwebsmith+client@gmail.com",
     password: process.env.SEED_CLIENT_PASSWORD || "client123",
     role: "client",
     company: "Client Company",
   },
   {
     name: "Developer User",
-    email: process.env.SEED_DEVELOPER_EMAIL || "developer@wsd.com",
+    email: process.env.SEED_DEVELOPER_EMAIL || "digitalwebsmith+developer@gmail.com",
     password: process.env.SEED_DEVELOPER_PASSWORD || "developer123",
     role: "developer",
     company: "WSD",
