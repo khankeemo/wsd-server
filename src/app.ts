@@ -16,6 +16,7 @@ connectDB().catch((error) => {
 });
 
 const defaultAllowedOrigins = [
+  "http://localhost:3000",
   "http://127.0.0.1:3000",
   "https://websmithdigital.com",
   "https://www.websmithdigital.com",
@@ -34,7 +35,10 @@ const isAllowedOrigin = (origin: string) => {
 
   try {
     const { hostname } = new URL(origin);
-    if (process.env.NODE_ENV !== "production" && hostname === "127.0.0.1") {
+    if (
+      process.env.NODE_ENV !== "production" &&
+      (hostname === "127.0.0.1" || hostname === "localhost")
+    ) {
       return true;
     }
     return false;
