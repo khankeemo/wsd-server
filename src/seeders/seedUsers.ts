@@ -2,12 +2,10 @@ import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { connectDB } from "../config/dbConnection.ts";
-import User from "../models/User.ts";
+import { connectDB } from "../config/dbConnection";
+import User from "../models/User";
 
-const currentFilePath = fileURLToPath(import.meta.url);
-const currentDir = path.dirname(currentFilePath);
+const currentDir = __dirname;
 
 dotenv.config({ path: path.resolve(currentDir, "../../.env") });
 

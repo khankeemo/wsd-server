@@ -6,6 +6,7 @@ import path from "path";
 import routes from "./routes";
 import { connectDB } from "./config/dbConnection";
 import { cleanupArchivedTickets } from "./controllers/ticket.controller";
+import { errorMiddleware } from "./middleware/error.middleware";
 
 dotenv.config({ quiet: true });
 
@@ -34,13 +35,20 @@ const isAllowedOrigin = (origin: string) => {
   }
 
   try {
-    const { hostname } = new URL(origin);
+    const { hostname, protocol } = new URL(origin);
     if (
       process.env.NODE_ENV !== "production" &&
       (hostname === "127.0.0.1" || hostname === "localhost")
     ) {
       return true;
     }
+
+    // Allow Vercel preview/production frontends without requiring every
+    // generated deployment URL to be hardcoded in ALLOWED_ORIGINS.
+    if (protocol === "https:" && hostname.endsWith(".vercel.app")) {
+      return true;
+    }
+
     return false;
   } catch {
     return false;
@@ -84,6 +92,7 @@ app.use("/api/uploads/messages", express.static(messageUploadsDir));
 // API routes
 app.get("/", (req, res) => res.send("OK"));
 app.use("/api", routes);
+app.use(errorMiddleware);
 
 // Serve frontend build
 app.use(express.static(path.join(__dirname, "../client")));
