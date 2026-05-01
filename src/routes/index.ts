@@ -17,6 +17,7 @@ import leadRoutes from './lead.routes';
 import serviceRoutes from './service.routes';
 import adminRoutes from './admin.routes';
 import webhookRoutes from './webhook.routes';
+import settingRoutes from './setting.routes';
 
 const router = Router();
 
@@ -35,5 +36,6 @@ router.use('/leads', leadRoutes);
 router.use('/services', serviceRoutes);
 router.use('/admin', adminRoutes);
 router.use('/webhooks', webhookRoutes);
+router.use('/settings', settingRoutes);
 
 export default router;
